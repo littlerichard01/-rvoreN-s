@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>ÁrvoreNós</title>
+  <meta name="description" content="Aplicação web de criação e conexão de nós em um quadro de trabalho." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <svg id="board" class="board" xmlns="http://www.w3.org/2000/svg" role="application" aria-label="Quadro de nós">
+      <defs>
+        <pattern id="grid-pattern" width="28" height="28" patternUnits="userSpaceOnUse">
+          <circle cx="1.2" cy="1.2" r="1.2" fill="#222833" />
+        </pattern>
+      </defs>
+      <g id="viewport">
+        <rect class="board__bg" x="-5000" y="-5000" width="10000" height="10000" fill="url(#grid-pattern)" />
+        <g id="layer-connections"></g>
+        <g id="layer-nodes"></g>
+      </g>
+    </svg>
+
+    <div class="toolbar">
+      <button type="button" class="btn btn--ghost" id="btn-export" title="Salvar o quadro em um arquivo JSON">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        Exportar
+      </button>
+      <button type="button" class="btn btn--ghost" id="btn-import" title="Carregar um quadro a partir de um arquivo JSON">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        Importar
+      </button>
+    </div>
+
+    <div class="mode-hint" id="mode-hint" role="status" hidden>
+      <span class="mode-hint__dot" aria-hidden="true"></span>
+      <strong>Modo de conexão ativo</strong>
+      <span class="mode-hint__tip">clique em dois nós para conectar ou desconectar</span>
+    </div>
+
+    <p class="empty" id="empty">Clique em <strong>+</strong> para criar o primeiro nó.</p>
+
+    <div class="controls">
+      <div class="zoom" role="group" aria-label="Zoom do quadro">
+        <button type="button" class="zoom__btn" id="btn-zoom-out" aria-label="Reduzir zoom" title="Reduzir zoom">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          </svg>
+        </button>
+        <button type="button" class="zoom__level" id="btn-zoom-reset" aria-label="Restaurar zoom para 100%" title="Restaurar zoom">100%</button>
+        <button type="button" class="zoom__btn" id="btn-zoom-in" aria-label="Aumentar zoom" title="Aumentar zoom">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+      <button type="button" class="mode-toggle" id="btn-mode" aria-pressed="false">Conectar</button>
+      <button type="button" class="fab" id="btn-add" aria-label="Adicionar nó" title="Adicionar nó">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+  </main>
+
+  <input type="file" id="file-input" accept=".json,application/json" hidden />
+
+  <dialog class="dialog" id="node-dialog" aria-labelledby="node-dialog-title">
+    <form class="dialog__form" id="node-form" novalidate>
+      <div class="dialog__head">
+        <h2 id="node-dialog-title">Novo nó</h2>
+        <button type="button" class="icon-btn" id="dialog-close" aria-label="Fechar">&#215;</button>
+      </div>
+
+      <div class="dialog__body">
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+
+        <div class="field">
+          <label for="field-text">Texto <span aria-hidden="true">*</span></label>
+          <input type="text" id="field-text" maxlength="60" autocomplete="off" placeholder="Ex.: Servidor principal" required />
+        </div>
+
+        <div class="field">
+          <label for="field-color">Cor</label>
+          <input type="color" id="field-color" value="#3b82f6" />
+        </div>
+      </div>
+
+      <div class="dialog__foot">
+        <button type="button" class="btn btn--danger" id="btn-delete" hidden>Excluir</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btn-cancel">Cancelar</button>
+        <button type="submit" class="btn btn--primary" id="btn-save">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog dialog--confirm" id="confirm-dialog" aria-labelledby="confirm-dialog-title">
+    <div class="dialog__head">
+      <h2 id="confirm-dialog-title">Confirmar</h2>
+    </div>
+    <div class="dialog__body">
+      <p class="confirm-text" id="confirm-message"></p>
+    </div>
+    <div class="dialog__foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="confirm-cancel">Cancelar</button>
+      <button type="button" class="btn btn--primary" id="confirm-ok">Confirmar</button>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="script.js" defer></script>
+</body>
+</html>
