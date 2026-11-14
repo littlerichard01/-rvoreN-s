@@ -15,17 +15,10 @@
         <pattern id="grid-pattern" width="28" height="28" patternUnits="userSpaceOnUse">
           <circle cx="1.2" cy="1.2" r="1.2" fill="#222833" />
         </pattern>
-        <pattern id="hex-pattern" width="114.315" height="198" patternUnits="userSpaceOnUse">
-          <path id="hex-cell" d="M0 -66L57.157 -33L57.157 33L0 66L-57.157 33L-57.157 -33Z" fill="none" stroke="#2b3340" stroke-width="1" />
-          <use href="#hex-cell" x="114.315" y="0" />
-          <use href="#hex-cell" x="0" y="198" />
-          <use href="#hex-cell" x="114.315" y="198" />
-          <use href="#hex-cell" x="57.157" y="99" />
-        </pattern>
       </defs>
       <g id="viewport">
         <rect class="board__bg" x="-5000" y="-5000" width="10000" height="10000" fill="url(#grid-pattern)" />
-        <rect class="board__hex" x="-5000" y="-5000" width="10000" height="10000" fill="url(#hex-pattern)" />
+        <g class="board__grid" id="layer-grid"></g>
         <g id="layer-connections"></g>
         <g id="layer-nodes"></g>
         <rect class="marquee" id="marquee" />
@@ -45,9 +38,10 @@
         </svg>
         Importar
       </button>
-      <button type="button" class="btn btn--ghost" id="btn-grid" aria-pressed="false" title="Ativar ou desativar a grade hexagonal">
+      <button type="button" class="btn btn--ghost" id="btn-grid" aria-pressed="false" title="Ativar ou desativar a grade em anéis">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M12 2.5l7.8 4.5v9L12 21.5l-7.8-4.5v-9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8" />
+          <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8" />
         </svg>
         Grade
       </button>

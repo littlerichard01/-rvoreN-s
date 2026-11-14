@@ -96,17 +96,31 @@ body {
 
 /* ------------------------------------------------------------ grade */
 
-.board__hex {
+.board__grid {
   display: none;
   pointer-events: none;
 }
 
-.app--grid .board__hex {
+.app--grid .board__grid {
   display: block;
 }
 
 .app--grid .board__bg {
   display: none;
+}
+
+.grid-ring {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.grid-spoke {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 /* ------------------------------------------------------------ conexões */

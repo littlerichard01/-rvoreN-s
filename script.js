@@ -34,8 +34,12 @@ const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 1.25;
 
-/** Grade hexagonal: raio (circunraio) de cada célula */
-const HEX_RADIUS = 66;
+/** Grade em anéis: distância entre anéis concêntricos */
+const RING_STEP = 180;
+/** Grade em anéis: posições de encaixe no primeiro anel (5, 10, 15… nos seguintes) */
+const RING_BASE_DIVISIONS = 5;
+/** Grade em anéis: quantidade de anéis desenhados a partir do centro */
+const RING_COUNT = 30;
 
 //#endregion
 
@@ -55,7 +59,7 @@ let editingId = null;     // nó em edição no modal (null = criação)
 let drag = null;          // arraste em andamento
 let pan = null;           // deslocamento do quadro (botão do meio) em andamento
 let marquee = null;       // caixa de seleção em andamento
-let gridEnabled = false;  // grade hexagonal ativa (com encaixe dos nós)
+let gridEnabled = false;  // grade em anéis ativa (com encaixe dos nós)
 
 /** Ids dos nós selecionados pela caixa de seleção */
 const selectedIds = new Set();
@@ -73,6 +77,7 @@ const visual = new Map();   // id -> { group, radius }
 
 const board = document.getElementById('board');
 const viewport = document.getElementById('viewport');
+const layerGrid = document.getElementById('layer-grid');
 const layerConnections = document.getElementById('layer-connections');
 const layerNodes = document.getElementById('layer-nodes');
 const emptyMsg = document.getElementById('empty');
@@ -292,42 +297,73 @@ function findFreePosition(radius) {
 
 //#endregion
 
-//#region Grade hexagonal
+//#region Grade em anéis
 
 /**
- * Arredonda coordenadas axiais para a célula hexagonal mais próxima.
+ * Quantidade de posições de encaixe no anel informado.
+ * Cresce 5 a cada anel: 5 no primeiro, 10 no segundo, 15 no terceiro…
  */
-function axialRound(q, r) {
-  const x = q;
-  const z = r;
-  const y = -x - z;
-
-  let rx = Math.round(x);
-  let ry = Math.round(y);
-  let rz = Math.round(z);
-
-  const dx = Math.abs(rx - x);
-  const dy = Math.abs(ry - y);
-  const dz = Math.abs(rz - z);
-
-  if (dx > dy && dx > dz) rx = -ry - rz;
-  else if (dy > dz) ry = -rx - rz;
-  else rz = -rx - ry;
-
-  return { q: rx, r: rz };
+function ringDivisions(ringIndex) {
+  return RING_BASE_DIVISIONS * Math.max(1, ringIndex);
 }
 
 /**
- * Converte um ponto do quadro para o centro da célula hexagonal mais próxima.
+ * Desenha a grade (anéis concêntricos + raios) em coordenadas do quadro.
+ *
+ * Cada faixa entre dois anéis tem os raios do anel externo, de modo que todo
+ * ponto de encaixe fica visível no cruzamento de um anel com um raio.
  */
-function snapToHex(x, y) {
-  const q = (Math.sqrt(3) / 3 * x - y / 3) / HEX_RADIUS;
-  const r = (2 / 3 * y) / HEX_RADIUS;
-  const cell = axialRound(q, r);
+function buildRingGrid() {
+  layerGrid.textContent = '';
+
+  const rings = [];
+  const spokes = [];
+
+  for (let i = 1; i <= RING_COUNT; i += 1) {
+    const radius = RING_STEP * i;
+    rings.push(
+      `M ${-radius} 0 a ${radius} ${radius} 0 1 0 ${radius * 2} 0 a ${radius} ${radius} 0 1 0 ${-radius * 2} 0`,
+    );
+
+    const divisions = ringDivisions(i);
+    const angularStep = (Math.PI * 2) / divisions;
+    const inner = radius - RING_STEP;
+
+    for (let j = 0; j < divisions; j += 1) {
+      const angle = angularStep * j;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      spokes.push(
+        `M ${(cos * inner).toFixed(2)} ${(sin * inner).toFixed(2)}`
+        + ` L ${(cos * radius).toFixed(2)} ${(sin * radius).toFixed(2)}`,
+      );
+    }
+  }
+
+  const ringsPath = document.createElementNS(SVG_NS, 'path');
+  ringsPath.setAttribute('class', 'grid-ring');
+  ringsPath.setAttribute('d', rings.join(' '));
+  layerGrid.appendChild(ringsPath);
+
+  const spokesPath = document.createElementNS(SVG_NS, 'path');
+  spokesPath.setAttribute('class', 'grid-spoke');
+  spokesPath.setAttribute('d', spokes.join(' '));
+  layerGrid.appendChild(spokesPath);
+}
+
+/**
+ * Converte um ponto do quadro para o cruzamento (anel × raio) mais próximo.
+ */
+function snapToGrid(x, y) {
+  const radius = Math.hypot(x, y);
+  const ringIndex = Math.round(radius / RING_STEP);
+  const ringRadius = ringIndex * RING_STEP;
+  const angularStep = (Math.PI * 2) / ringDivisions(ringIndex);
+  const angle = Math.round(Math.atan2(y, x) / angularStep) * angularStep;
 
   return {
-    x: HEX_RADIUS * Math.sqrt(3) * (cell.q + cell.r / 2),
-    y: HEX_RADIUS * 1.5 * cell.r,
+    x: ringRadius * Math.cos(angle),
+    y: ringRadius * Math.sin(angle),
   };
 }
 
@@ -794,7 +830,7 @@ function onPointerMove(event) {
   let y = clamp(point.y + drag.offsetY, minY, maxY);
 
   if (gridEnabled) {
-    const snapped = snapToHex(x, y);
+    const snapped = snapToGrid(x, y);
     x = snapped.x;
     y = snapped.y;
   }
@@ -969,7 +1005,7 @@ function submitNodeForm(event) {
     }
   } else {
     let position = findFreePosition(NODE_RADIUS);
-    if (gridEnabled) position = snapToHex(position.x, position.y);
+    if (gridEnabled) position = snapToGrid(position.x, position.y);
     state.nodes.push({
       id: makeId(),
       text,
@@ -1256,6 +1292,7 @@ function bindEvents() {
 function init() {
   loadFromStorage();
   bindEvents();
+  buildRingGrid();
   applyViewport();
   updateZoomControls();
   renderAll();
