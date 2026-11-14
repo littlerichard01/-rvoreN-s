@@ -63,6 +63,25 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+.board--panning {
+  cursor: grabbing;
+}
+
+/* ------------------------------------------------------------ grade */
+
+.board__hex {
+  display: none;
+  pointer-events: none;
+}
+
+.app--grid .board__hex {
+  display: block;
+}
+
+.app--grid .board__bg {
+  display: none;
+}
+
 /* ------------------------------------------------------------ conexões */
 
 .connection {
@@ -357,6 +376,11 @@ body {
 .btn--ghost {
   background: rgba(23, 27, 35, .85);
   backdrop-filter: blur(6px);
+}
+
+.btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .btn--primary {

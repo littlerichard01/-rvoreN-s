@@ -13,13 +13,15 @@ const STORAGE_KEY = 'arvorenos:board:v1';
 const DEFAULT_COLOR = '#3b82f6';
 const NODE_FONT = '600 13px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 const FONT_SIZE = 13;
-const MIN_RADIUS = 34;
-const MAX_RADIUS = 72;
+const NODE_RADIUS = 46;
 const DRAG_THRESHOLD = 4;
 
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 1.25;
+
+/** Grade hexagonal: raio (circunraio) de cada célula */
+const HEX_RADIUS = 66;
 
 //#endregion
 
@@ -37,6 +39,8 @@ let selectedId = null;    // nó aberto no modal de edição
 let pendingId = null;     // primeiro nó escolhido no modo de conexão
 let editingId = null;     // nó em edição no modal (null = criação)
 let drag = null;          // arraste em andamento
+let pan = null;           // deslocamento do quadro (botão do meio) em andamento
+let gridEnabled = false;  // grade hexagonal ativa (com encaixe dos nós)
 
 /** Transformação do quadro: escala (k) e deslocamento (tx, ty) em pixels de tela */
 const view = { k: 1, tx: 0, ty: 0 };
@@ -59,6 +63,7 @@ const btnMode = document.getElementById('btn-mode');
 const btnAdd = document.getElementById('btn-add');
 const btnExport = document.getElementById('btn-export');
 const btnImport = document.getElementById('btn-import');
+const btnGrid = document.getElementById('btn-grid');
 const btnZoomIn = document.getElementById('btn-zoom-in');
 const btnZoomOut = document.getElementById('btn-zoom-out');
 const btnZoomReset = document.getElementById('btn-zoom-reset');
@@ -198,14 +203,24 @@ function resetView() {
   updateZoomControls();
 }
 
+/**
+ * Zoom com a roda do mouse, mantendo o cursor como ponto fixo.
+ */
+function onWheel(event) {
+  let delta = event.deltaY;
+  if (event.deltaMode === 1) delta *= 16;
+  else if (event.deltaMode === 2) delta *= 100;
+
+  const factor = Math.exp(-delta * 0.0015);
+  const rect = board.getBoundingClientRect();
+  setZoom(view.k * factor, { x: event.clientX - rect.left, y: event.clientY - rect.top });
+
+  event.preventDefault();
+}
+
 //#endregion
 
 //#region Dimensões e texto dos nós
-
-function radiusFor(text) {
-  const width = measureText(text);
-  return Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, width / 2 + 14));
-}
 
 function maxTextWidth(radius) {
   const halfLine = FONT_SIZE / 2 + 3;
@@ -241,7 +256,7 @@ function findFreePosition(radius) {
 
     const free = state.nodes.every((node) => {
       const other = visual.get(node.id);
-      const otherRadius = other ? other.radius : MIN_RADIUS;
+      const otherRadius = other ? other.radius : NODE_RADIUS;
       return Math.hypot(node.position.x - x, node.position.y - y) >= radius + otherRadius + 18;
     });
 
@@ -252,6 +267,52 @@ function findFreePosition(radius) {
     x: centerX + (Math.random() - 0.5) * 80,
     y: centerY + (Math.random() - 0.5) * 80,
   };
+}
+
+//#endregion
+
+//#region Grade hexagonal
+
+/**
+ * Arredonda coordenadas axiais para a célula hexagonal mais próxima.
+ */
+function axialRound(q, r) {
+  const x = q;
+  const z = r;
+  const y = -x - z;
+
+  let rx = Math.round(x);
+  let ry = Math.round(y);
+  let rz = Math.round(z);
+
+  const dx = Math.abs(rx - x);
+  const dy = Math.abs(ry - y);
+  const dz = Math.abs(rz - z);
+
+  if (dx > dy && dx > dz) rx = -ry - rz;
+  else if (dy > dz) ry = -rx - rz;
+  else rz = -rx - ry;
+
+  return { q: rx, r: rz };
+}
+
+/**
+ * Converte um ponto do quadro para o centro da célula hexagonal mais próxima.
+ */
+function snapToHex(x, y) {
+  const q = (Math.sqrt(3) / 3 * x - y / 3) / HEX_RADIUS;
+  const r = (2 / 3 * y) / HEX_RADIUS;
+  const cell = axialRound(q, r);
+
+  return {
+    x: HEX_RADIUS * Math.sqrt(3) * (cell.q + cell.r / 2),
+    y: HEX_RADIUS * 1.5 * cell.r,
+  };
+}
+
+function setGrid(enabled) {
+  gridEnabled = enabled;
+  syncStyles();
 }
 
 //#endregion
@@ -298,7 +359,7 @@ function loadFromStorage() {
 //#region Renderização
 
 function buildNodeVisual(node) {
-  const radius = radiusFor(node.text);
+  const radius = NODE_RADIUS;
 
   const group = document.createElementNS(SVG_NS, 'g');
   group.setAttribute('class', 'node');
@@ -338,8 +399,8 @@ function updateConnectionGeometry(conn) {
   const target = findNode(conn.targetId);
   if (!source || !target) return;
 
-  const sourceRadius = (visual.get(source.id) || {}).radius || MIN_RADIUS;
-  const targetRadius = (visual.get(target.id) || {}).radius || MIN_RADIUS;
+  const sourceRadius = (visual.get(source.id) || {}).radius || NODE_RADIUS;
+  const targetRadius = (visual.get(target.id) || {}).radius || NODE_RADIUS;
 
   let dx = target.position.x - source.position.x;
   let dy = target.position.y - source.position.y;
@@ -364,9 +425,11 @@ function updateConnectionGeometry(conn) {
 
 function syncStyles() {
   appEl.classList.toggle('app--connect', mode === 'connect');
+  appEl.classList.toggle('app--grid', gridEnabled);
   modeHint.hidden = mode !== 'connect';
   btnMode.textContent = mode === 'connect' ? 'Editar' : 'Conectar';
   btnMode.setAttribute('aria-pressed', String(mode === 'connect'));
+  btnGrid.setAttribute('aria-pressed', String(gridEnabled));
 
   nodeEls.forEach((group, id) => {
     group.classList.toggle('node--selected', mode === 'edit' && id === selectedId);
@@ -491,6 +554,25 @@ function toggleConnection(sourceId, targetId) {
 //#region Arraste (Pointer Events)
 
 function onPointerDown(event) {
+  // Botão do meio (rodinha): desloca o quadro.
+  if (event.button === 1) {
+    pan = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      tx: view.tx,
+      ty: view.ty,
+    };
+    board.classList.add('board--panning');
+    event.preventDefault();
+    try {
+      board.setPointerCapture(event.pointerId);
+    } catch (error) {
+      /* ignore */
+    }
+    return;
+  }
+
   if (event.button !== undefined && event.button !== 0) return;
 
   const group = event.target.closest ? event.target.closest('.node') : null;
@@ -519,6 +601,14 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
+  if (pan && event.pointerId === pan.pointerId) {
+    view.tx = pan.tx + (event.clientX - pan.startX);
+    view.ty = pan.ty + (event.clientY - pan.startY);
+    applyViewport();
+    event.preventDefault();
+    return;
+  }
+
   if (!drag || event.pointerId !== drag.pointerId) return;
 
   if (!drag.moved) {
@@ -533,22 +623,38 @@ function onPointerMove(event) {
 
   const point = toBoardPoint(event);
   const area = visibleWorldRect();
-  const radius = (visual.get(drag.id) || {}).radius || MIN_RADIUS;
+  const radius = (visual.get(drag.id) || {}).radius || NODE_RADIUS;
   const minX = area.left + radius + 6;
   const minY = area.top + radius + 6;
   const maxX = Math.max(minX, area.left + area.width - radius - 6);
   const maxY = Math.max(minY, area.top + area.height - radius - 6);
 
-  moveNode(
-    drag.id,
-    clamp(point.x + drag.offsetX, minX, maxX),
-    clamp(point.y + drag.offsetY, minY, maxY),
-  );
+  let x = clamp(point.x + drag.offsetX, minX, maxX);
+  let y = clamp(point.y + drag.offsetY, minY, maxY);
+
+  if (gridEnabled) {
+    const snapped = snapToHex(x, y);
+    x = snapped.x;
+    y = snapped.y;
+  }
+
+  moveNode(drag.id, x, y);
 
   event.preventDefault();
 }
 
 function onPointerUp(event) {
+  if (pan && event.pointerId === pan.pointerId) {
+    pan = null;
+    board.classList.remove('board--panning');
+    try {
+      board.releasePointerCapture(event.pointerId);
+    } catch (error) {
+      /* ignore */
+    }
+    return;
+  }
+
   if (!drag || event.pointerId !== drag.pointerId) return;
 
   const { id, moved } = drag;
@@ -571,6 +677,12 @@ function onPointerUp(event) {
 }
 
 function onPointerCancel(event) {
+  if (pan && event.pointerId === pan.pointerId) {
+    pan = null;
+    board.classList.remove('board--panning');
+    return;
+  }
+
   if (!drag || event.pointerId !== drag.pointerId) return;
 
   const group = nodeEls.get(drag.id);
@@ -649,12 +761,13 @@ function submitNodeForm(event) {
       toast('Nó atualizado.');
     }
   } else {
-    const radius = radiusFor(text);
+    let position = findFreePosition(NODE_RADIUS);
+    if (gridEnabled) position = snapToHex(position.x, position.y);
     state.nodes.push({
       id: makeId(),
       text,
       color,
-      position: findFreePosition(radius),
+      position,
     });
     toast('Nó criado.');
   }
@@ -898,11 +1011,13 @@ function bindEvents() {
   btnMode.addEventListener('click', () => setMode(mode === 'edit' ? 'connect' : 'edit'));
   btnExport.addEventListener('click', exportBoard);
   btnImport.addEventListener('click', () => fileInput.click());
+  btnGrid.addEventListener('click', () => setGrid(!gridEnabled));
   fileInput.addEventListener('change', onFileSelected);
 
   btnZoomIn.addEventListener('click', () => setZoom(view.k * ZOOM_STEP));
   btnZoomOut.addEventListener('click', () => setZoom(view.k / ZOOM_STEP));
   btnZoomReset.addEventListener('click', resetView);
+  board.addEventListener('wheel', onWheel, { passive: false });
 
   nodeForm.addEventListener('submit', submitNodeForm);
   btnDelete.addEventListener('click', deleteCurrentNode);
@@ -920,6 +1035,9 @@ function bindEvents() {
   board.addEventListener('pointerup', onPointerUp);
   board.addEventListener('pointercancel', onPointerCancel);
   board.addEventListener('contextmenu', (event) => event.preventDefault());
+  board.addEventListener('mousedown', (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
   layerNodes.addEventListener('keydown', onNodeKeydown);
 }
 
