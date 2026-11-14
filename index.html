@@ -28,6 +28,7 @@
         <rect class="board__hex" x="-5000" y="-5000" width="10000" height="10000" fill="url(#hex-pattern)" />
         <g id="layer-connections"></g>
         <g id="layer-nodes"></g>
+        <rect class="marquee" id="marquee" />
       </g>
     </svg>
 
@@ -59,6 +60,10 @@
     </div>
 
     <p class="empty" id="empty">Clique em <strong>+</strong> para criar o primeiro nó.</p>
+
+    <div class="selection-actions">
+      <button type="button" class="btn btn--danger" id="btn-delete-selected" hidden>Excluir selecionados</button>
+    </div>
 
     <div class="controls">
       <div class="zoom" role="group" aria-label="Zoom do quadro">
@@ -102,7 +107,10 @@
 
         <div class="field">
           <label for="field-color">Cor</label>
-          <input type="color" id="field-color" value="#3b82f6" />
+          <div class="color-field">
+            <div class="swatches" id="color-swatches" role="group" aria-label="Cores predefinidas"></div>
+            <input type="color" id="field-color" value="#3b82f6" />
+          </div>
         </div>
       </div>
 

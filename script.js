@@ -11,6 +11,20 @@ const SUPPORTED_VERSIONS = [1];
 const STORAGE_KEY = 'arvorenos:board:v1';
 
 const DEFAULT_COLOR = '#3b82f6';
+
+/** Cores fixas acima do seletor de cor: 5 bases e a intermediária entre cada par */
+const PRESET_COLORS = [
+  { name: 'Vermelho', value: '#ef4444' },
+  { name: 'Magenta', value: '#d946ef' },
+  { name: 'Roxo', value: '#8b5cf6' },
+  { name: 'Anil', value: '#6366f1' },
+  { name: 'Azul', value: '#3b82f6' },
+  { name: 'Ciano', value: '#06b6d4' },
+  { name: 'Verde', value: '#22c55e' },
+  { name: 'Lima', value: '#84cc16' },
+  { name: 'Amarelo', value: '#eab308' },
+  { name: 'Laranja', value: '#f97316' },
+];
 const NODE_FONT = '600 13px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 const FONT_SIZE = 13;
 const NODE_RADIUS = 46;
@@ -40,7 +54,11 @@ let pendingId = null;     // primeiro nó escolhido no modo de conexão
 let editingId = null;     // nó em edição no modal (null = criação)
 let drag = null;          // arraste em andamento
 let pan = null;           // deslocamento do quadro (botão do meio) em andamento
+let marquee = null;       // caixa de seleção em andamento
 let gridEnabled = false;  // grade hexagonal ativa (com encaixe dos nós)
+
+/** Ids dos nós selecionados pela caixa de seleção */
+const selectedIds = new Set();
 
 /** Transformação do quadro: escala (k) e deslocamento (tx, ty) em pixels de tela */
 const view = { k: 1, tx: 0, ty: 0 };
@@ -59,6 +77,8 @@ const layerConnections = document.getElementById('layer-connections');
 const layerNodes = document.getElementById('layer-nodes');
 const emptyMsg = document.getElementById('empty');
 const modeHint = document.getElementById('mode-hint');
+const marqueeRect = document.getElementById('marquee');
+const btnDeleteSelected = document.getElementById('btn-delete-selected');
 const btnMode = document.getElementById('btn-mode');
 const btnAdd = document.getElementById('btn-add');
 const btnExport = document.getElementById('btn-export');
@@ -74,6 +94,7 @@ const nodeForm = document.getElementById('node-form');
 const nodeDialogTitle = document.getElementById('node-dialog-title');
 const fieldText = document.getElementById('field-text');
 const fieldColor = document.getElementById('field-color');
+const colorSwatches = document.getElementById('color-swatches');
 const formError = document.getElementById('form-error');
 const btnDelete = document.getElementById('btn-delete');
 const btnCancel = document.getElementById('btn-cancel');
@@ -432,11 +453,16 @@ function syncStyles() {
   btnGrid.setAttribute('aria-pressed', String(gridEnabled));
 
   nodeEls.forEach((group, id) => {
-    group.classList.toggle('node--selected', mode === 'edit' && id === selectedId);
+    const highlighted = (mode === 'edit' && id === selectedId) || selectedIds.has(id);
+    group.classList.toggle('node--selected', highlighted);
     group.classList.toggle('node--pending', id === pendingId);
   });
 
   emptyMsg.hidden = state.nodes.length > 0;
+  btnDeleteSelected.hidden = selectedIds.size === 0;
+  btnDeleteSelected.textContent = selectedIds.size > 1
+    ? `Excluir selecionados (${selectedIds.size})`
+    : 'Excluir selecionado';
 }
 
 function renderAll() {
@@ -551,6 +577,131 @@ function toggleConnection(sourceId, targetId) {
 
 //#endregion
 
+//#region Caixa de seleção
+
+function clearSelection() {
+  if (selectedIds.size === 0) return;
+  selectedIds.clear();
+  syncStyles();
+}
+
+function nodeIntersectsRect(node, rect) {
+  const radius = (visual.get(node.id) || {}).radius || NODE_RADIUS;
+  const nx = clamp(node.position.x, rect.x, rect.x + rect.width);
+  const ny = clamp(node.position.y, rect.y, rect.y + rect.height);
+  return Math.hypot(node.position.x - nx, node.position.y - ny) <= radius;
+}
+
+/**
+ * Seleciona os nós que tocam a caixa. Com Shift, preserva a seleção anterior.
+ */
+function applyMarqueeSelection(rect, additive) {
+  if (!additive) selectedIds.clear();
+  state.nodes.forEach((node) => {
+    if (nodeIntersectsRect(node, rect)) selectedIds.add(node.id);
+  });
+  syncStyles();
+}
+
+function marqueeGeometry(start, current) {
+  return {
+    x: Math.min(start.x, current.x),
+    y: Math.min(start.y, current.y),
+    width: Math.abs(current.x - start.x),
+    height: Math.abs(current.y - start.y),
+  };
+}
+
+function setMarqueeVisible(visible) {
+  marqueeRect.classList.toggle('marquee--visible', visible);
+}
+
+function startMarquee(event) {
+  marquee = {
+    pointerId: event.pointerId,
+    start: toBoardPoint(event),
+    startX: event.clientX,
+    startY: event.clientY,
+    additive: event.shiftKey,
+    moved: false,
+  };
+
+  board.classList.add('board--marquee');
+  event.preventDefault();
+  try {
+    board.setPointerCapture(event.pointerId);
+  } catch (error) {
+    /* ignore */
+  }
+}
+
+function updateMarquee(event) {
+  if (!marquee.moved) {
+    const dx = event.clientX - marquee.startX;
+    const dy = event.clientY - marquee.startY;
+    if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    marquee.moved = true;
+  }
+
+  const rect = marqueeGeometry(marquee.start, toBoardPoint(event));
+
+  setMarqueeVisible(true);
+  marqueeRect.setAttribute('x', rect.x.toFixed(2));
+  marqueeRect.setAttribute('y', rect.y.toFixed(2));
+  marqueeRect.setAttribute('width', rect.width.toFixed(2));
+  marqueeRect.setAttribute('height', rect.height.toFixed(2));
+
+  applyMarqueeSelection(rect, marquee.additive);
+}
+
+function finishMarquee(event) {
+  const { moved, additive } = marquee;
+  marquee = null;
+  board.classList.remove('board--marquee');
+  setMarqueeVisible(false);
+
+  try {
+    board.releasePointerCapture(event.pointerId);
+  } catch (error) {
+    /* ignore */
+  }
+
+  // Clique simples fora dos nós limpa a seleção.
+  if (!moved && !additive) clearSelection();
+}
+
+function cancelMarquee() {
+  marquee = null;
+  board.classList.remove('board--marquee');
+  setMarqueeVisible(false);
+}
+
+async function deleteSelectedNodes() {
+  if (selectedIds.size === 0) return;
+
+  const total = selectedIds.size;
+  const message = total > 1
+    ? `Excluir ${total} nós selecionados e todas as conexões ligadas a eles?`
+    : 'Excluir o nó selecionado e todas as conexões ligadas a ele?';
+
+  const confirmed = await askConfirm(message);
+  if (!confirmed) return;
+
+  state.nodes = state.nodes.filter((node) => !selectedIds.has(node.id));
+  state.connections = state.connections.filter(
+    (conn) => !selectedIds.has(conn.sourceId) && !selectedIds.has(conn.targetId),
+  );
+  if (selectedIds.has(pendingId)) pendingId = null;
+  if (selectedIds.has(editingId)) editingId = null;
+  selectedIds.clear();
+
+  save();
+  renderAll();
+  toast(total > 1 ? 'Nós excluídos.' : 'Nó excluído.');
+}
+
+//#endregion
+
 //#region Arraste (Pointer Events)
 
 function onPointerDown(event) {
@@ -576,7 +727,11 @@ function onPointerDown(event) {
   if (event.button !== undefined && event.button !== 0) return;
 
   const group = event.target.closest ? event.target.closest('.node') : null;
-  if (!group) return;
+  if (!group) {
+    // Clique/arraste fora dos nós: inicia a caixa de seleção no modo de edição.
+    if (mode === 'edit') startMarquee(event);
+    return;
+  }
 
   const node = findNode(group.dataset.id);
   if (!node) return;
@@ -605,6 +760,12 @@ function onPointerMove(event) {
     view.tx = pan.tx + (event.clientX - pan.startX);
     view.ty = pan.ty + (event.clientY - pan.startY);
     applyViewport();
+    event.preventDefault();
+    return;
+  }
+
+  if (marquee && event.pointerId === marquee.pointerId) {
+    updateMarquee(event);
     event.preventDefault();
     return;
   }
@@ -655,6 +816,11 @@ function onPointerUp(event) {
     return;
   }
 
+  if (marquee && event.pointerId === marquee.pointerId) {
+    finishMarquee(event);
+    return;
+  }
+
   if (!drag || event.pointerId !== drag.pointerId) return;
 
   const { id, moved } = drag;
@@ -680,6 +846,11 @@ function onPointerCancel(event) {
   if (pan && event.pointerId === pan.pointerId) {
     pan = null;
     board.classList.remove('board--panning');
+    return;
+  }
+
+  if (marquee && event.pointerId === marquee.pointerId) {
+    cancelMarquee();
     return;
   }
 
@@ -709,6 +880,39 @@ function setFormError(message) {
   formError.textContent = message || '';
 }
 
+/**
+ * Cria as bolinhas de cores fixas acima do seletor de cor.
+ */
+function buildColorSwatches() {
+  PRESET_COLORS.forEach(({ name, value }) => {
+    const swatch = document.createElement('button');
+    swatch.type = 'button';
+    swatch.className = 'swatch';
+    swatch.dataset.color = value;
+    swatch.title = name;
+    swatch.setAttribute('aria-label', name);
+    swatch.style.setProperty('--swatch', value);
+    swatch.addEventListener('click', () => {
+      fieldColor.value = value;
+      syncColorSwatches();
+    });
+    colorSwatches.appendChild(swatch);
+  });
+
+  // Digitar/escolher uma cor no seletor nativo também atualiza as bolinhas.
+  fieldColor.addEventListener('input', syncColorSwatches);
+}
+
+/** Marca a bolinha correspondente à cor atual do campo. */
+function syncColorSwatches() {
+  const current = fieldColor.value.toLowerCase();
+  colorSwatches.querySelectorAll('.swatch').forEach((swatch) => {
+    const active = swatch.dataset.color.toLowerCase() === current;
+    swatch.classList.toggle('swatch--active', active);
+    swatch.setAttribute('aria-pressed', String(active));
+  });
+}
+
 function openCreateDialog() {
   editingId = null;
   nodeDialogTitle.textContent = 'Novo nó';
@@ -716,6 +920,7 @@ function openCreateDialog() {
   fieldColor.value = DEFAULT_COLOR;
   btnDelete.hidden = true;
   setFormError('');
+  syncColorSwatches();
   nodeDialog.showModal();
   fieldText.focus();
 }
@@ -724,6 +929,7 @@ function openEditDialog(id) {
   const node = findNode(id);
   if (!node) return;
 
+  clearSelection();
   editingId = id;
   selectedId = id;
   nodeDialogTitle.textContent = 'Editar nó';
@@ -731,6 +937,7 @@ function openEditDialog(id) {
   fieldColor.value = node.color;
   btnDelete.hidden = false;
   setFormError('');
+  syncColorSwatches();
   syncStyles();
   nodeDialog.showModal();
   fieldText.focus();
@@ -792,6 +999,7 @@ async function deleteCurrentNode() {
     (conn) => conn.sourceId !== id && conn.targetId !== id,
   );
   if (pendingId === id) pendingId = null;
+  selectedIds.delete(id);
 
   closeNodeDialog();
   save();
@@ -971,6 +1179,7 @@ function applyBoard(data) {
   state.connections = data.connections;
   selectedId = null;
   pendingId = null;
+  selectedIds.clear();
   save();
   renderAll();
 }
@@ -1007,11 +1216,14 @@ function onFileSelected(event) {
 //#region Inicialização
 
 function bindEvents() {
+  buildColorSwatches();
+
   btnAdd.addEventListener('click', openCreateDialog);
   btnMode.addEventListener('click', () => setMode(mode === 'edit' ? 'connect' : 'edit'));
   btnExport.addEventListener('click', exportBoard);
   btnImport.addEventListener('click', () => fileInput.click());
   btnGrid.addEventListener('click', () => setGrid(!gridEnabled));
+  btnDeleteSelected.addEventListener('click', deleteSelectedNodes);
   fileInput.addEventListener('change', onFileSelected);
 
   btnZoomIn.addEventListener('click', () => setZoom(view.k * ZOOM_STEP));
