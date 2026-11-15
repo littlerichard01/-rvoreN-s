@@ -11,6 +11,14 @@ const SUPPORTED_VERSIONS = [1];
 const STORAGE_KEY = 'arvorenos:board:v1';
 
 const DEFAULT_COLOR = '#3b82f6';
+/** Laranja de destaque usado na aplicação */
+const ACCENT_COLOR = '#e8873c';
+/** Cor padrão da borda do nó quando a opção "Borda" é ativada */
+const DEFAULT_BORDER_COLOR = ACCENT_COLOR;
+/** Cor padrão de uma ligação (mesma de --connection no CSS) */
+const DEFAULT_CONNECTION_COLOR = '#7e8a9c';
+/** Espessura da borda do nó quando ativada */
+const NODE_BORDER_WIDTH = 3;
 
 /** Cores fixas acima do seletor de cor: 5 bases e a intermediária entre cada par */
 const PRESET_COLORS = [
@@ -56,6 +64,7 @@ let mode = 'edit';        // 'edit' | 'connect'
 let selectedId = null;    // nó aberto no modal de edição
 let pendingId = null;     // primeiro nó escolhido no modo de conexão
 let editingId = null;     // nó em edição no modal (null = criação)
+let editingConnectionId = null;  // ligação em edição no modal de cor
 let drag = null;          // arraste em andamento
 let pan = null;           // deslocamento do quadro (botão do meio) em andamento
 let marquee = null;       // caixa de seleção em andamento
@@ -68,7 +77,7 @@ const selectedIds = new Set();
 const view = { k: 1, tx: 0, ty: 0 };
 
 const nodeEls = new Map();  // id -> <g>
-const connEls = new Map();  // id -> <line>
+const connEls = new Map();  // id -> <g> (área de clique + linha visível)
 const visual = new Map();   // id -> { group, radius }
 
 //#endregion
@@ -88,6 +97,8 @@ const btnMode = document.getElementById('btn-mode');
 const btnAdd = document.getElementById('btn-add');
 const btnExport = document.getElementById('btn-export');
 const btnImport = document.getElementById('btn-import');
+const btnPng = document.getElementById('btn-png');
+const pngMenu = document.getElementById('png-menu');
 const btnGrid = document.getElementById('btn-grid');
 const btnZoomIn = document.getElementById('btn-zoom-in');
 const btnZoomOut = document.getElementById('btn-zoom-out');
@@ -100,10 +111,21 @@ const nodeDialogTitle = document.getElementById('node-dialog-title');
 const fieldText = document.getElementById('field-text');
 const fieldColor = document.getElementById('field-color');
 const colorSwatches = document.getElementById('color-swatches');
+const fieldBorder = document.getElementById('field-border');
+const fieldBorderColor = document.getElementById('field-border-color');
+const borderColorField = document.getElementById('border-color-field');
+const borderDefault = document.getElementById('border-default');
 const formError = document.getElementById('form-error');
 const btnDelete = document.getElementById('btn-delete');
 const btnCancel = document.getElementById('btn-cancel');
 const dialogClose = document.getElementById('dialog-close');
+
+const connectionDialog = document.getElementById('connection-dialog');
+const connectionForm = document.getElementById('connection-form');
+const fieldConnectionColor = document.getElementById('field-connection-color');
+const connectionPreset = document.getElementById('connection-accent');
+const connectionCancel = document.getElementById('connection-cancel');
+const connectionClose = document.getElementById('connection-close');
 
 const confirmEl = document.getElementById('confirm-dialog');
 const confirmMessage = document.getElementById('confirm-message');
@@ -127,6 +149,75 @@ function measureText(text) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+/** Converte "#rrggbb" em canais { r, g, b } (0–255). */
+function hexToRgb(hex) {
+  const value = hex.replace('#', '');
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16),
+  };
+}
+
+/** Converte canais 0–255 em "#rrggbb". */
+function rgbToHex(r, g, b) {
+  const channel = (value) => clamp(Math.round(value), 0, 255).toString(16).padStart(2, '0');
+  return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+
+/** Converte canais 0–255 em { h: 0–360, s: 0–1, v: 0–1 }. */
+function rgbToHsv(r, g, b) {
+  const red = r / 255;
+  const green = g / 255;
+  const blue = b / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+
+  let hue = 0;
+  if (delta !== 0) {
+    if (max === red) hue = ((green - blue) / delta) % 6;
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    hue *= 60;
+    if (hue < 0) hue += 360;
+  }
+
+  return { h: hue, s: max === 0 ? 0 : delta / max, v: max };
+}
+
+/** Converte { h, s, v } em canais 0–255. */
+function hsvToRgb(h, s, v) {
+  const chroma = v * s;
+  const second = chroma * (1 - Math.abs(((h / 60) % 2) - 1));
+  const base = v - chroma;
+
+  let rgb;
+  if (h < 60) rgb = [chroma, second, 0];
+  else if (h < 120) rgb = [second, chroma, 0];
+  else if (h < 180) rgb = [0, chroma, second];
+  else if (h < 240) rgb = [0, second, chroma];
+  else if (h < 300) rgb = [second, 0, chroma];
+  else rgb = [chroma, 0, second];
+
+  return { r: (rgb[0] + base) * 255, g: (rgb[1] + base) * 255, b: (rgb[2] + base) * 255 };
+}
+
+/** Aceita "#abc" ou "#aabbcc" (com ou sem "#") e devolve "#aabbcc" — ou null. */
+function normalizeHex(text) {
+  const value = String(text).trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/i.test(value)) {
+    return `#${value[0]}${value[0]}${value[1]}${value[1]}${value[2]}${value[2]}`.toLowerCase();
+  }
+  if (/^[0-9a-f]{6}$/i.test(value)) return `#${value.toLowerCase()}`;
+  return null;
+}
+
+function hsvFromHex(hex) {
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHsv(r, g, b);
 }
 
 function makeId() {
@@ -182,6 +273,238 @@ function visibleWorldRect() {
 function formatDate(date) {
   const pad = (value) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+//#endregion
+
+//#region Seletor de cor
+
+/** Ícone do botão de copiar. */
+const COPY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+  + '<rect x="9" y="9" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8" />'
+  + '<path d="M15 5V4.5A1.5 1.5 0 0 0 13.5 3h-9A1.5 1.5 0 0 0 3 4.5v9A1.5 1.5 0 0 0 4.5 15H5"'
+  + ' fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />'
+  + '</svg>';
+
+/** Seletor de cor aberto no momento (apenas um por vez). */
+let activePicker = null;
+
+function closeActivePicker() {
+  if (activePicker) activePicker.close();
+}
+
+/**
+ * Troca um <input type="hidden"> por um seletor de cor próprio: amostra da
+ * cor, código hexadecimal editável, botão de copiar e painel HSV em um popover.
+ *
+ * O input original continua guardando o valor — quem lê `input.value` segue
+ * funcionando, e as escritas programáticas são interceptadas para que o painel
+ * acompanhe a cor atual.
+ */
+function createColorPicker(input) {
+  const nativeValue = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
+
+  const root = document.createElement('div');
+  root.className = 'picker';
+
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'picker__chip';
+  chip.setAttribute('aria-haspopup', 'dialog');
+  chip.setAttribute('aria-expanded', 'false');
+  chip.setAttribute('aria-label', 'Abrir seletor de cor');
+
+  const hexInput = document.createElement('input');
+  hexInput.type = 'text';
+  hexInput.className = 'picker__hex';
+  hexInput.spellcheck = false;
+  hexInput.autocomplete = 'off';
+  hexInput.maxLength = 7;
+  hexInput.setAttribute('aria-label', 'Código hexadecimal');
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'picker__copy';
+  copyBtn.title = 'Copiar código';
+  copyBtn.setAttribute('aria-label', 'Copiar código hexadecimal');
+  copyBtn.innerHTML = COPY_ICON;
+
+  const pop = document.createElement('div');
+  pop.className = 'picker__pop';
+  pop.hidden = true;
+
+  const area = document.createElement('div');
+  area.className = 'picker__area';
+  const areaThumb = document.createElement('span');
+  areaThumb.className = 'picker__thumb';
+  area.append(areaThumb);
+
+  const hue = document.createElement('div');
+  hue.className = 'picker__hue';
+  const hueThumb = document.createElement('span');
+  hueThumb.className = 'picker__thumb';
+  hue.append(hueThumb);
+
+  pop.append(area, hue);
+  root.append(chip, hexInput, copyBtn, pop);
+  input.parentNode.insertBefore(root, input);
+  input.hidden = true;
+
+  let hsv = hsvFromHex(input.value || DEFAULT_COLOR);
+  let internal = false;
+
+  function render() {
+    const hex = input.value;
+    root.style.setProperty('--picker-color', hex);
+    root.style.setProperty('--picker-hue', `hsl(${Math.round(hsv.h)} 100% 50%)`);
+    if (document.activeElement !== hexInput) hexInput.value = hex;
+    areaThumb.style.left = `${hsv.s * 100}%`;
+    areaThumb.style.top = `${(1 - hsv.v) * 100}%`;
+    hueThumb.style.left = `${(hsv.h / 360) * 100}%`;
+  }
+
+  /** Grava o valor no input e avisa os ouvintes (bolinhas de cor, etc.). */
+  function commit(hex) {
+    input.value = hex;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /** Aplica um código hexadecimal: o HSV é recalculado a partir dele. */
+  function setFromHex(hex) {
+    commit(hex);
+  }
+
+  /** Aplica o HSV atual preservando o matiz (evita saltos em cores neutras). */
+  function updateFromHsv() {
+    const { r, g, b } = hsvToRgb(hsv.h, hsv.s, hsv.v);
+    internal = true;
+    commit(rgbToHex(r, g, b));
+    internal = false;
+  }
+
+  Object.defineProperty(input, 'value', {
+    configurable: true,
+    get() {
+      return nativeValue.get.call(input);
+    },
+    set(value) {
+      nativeValue.set.call(input, value);
+      if (!internal) hsv = hsvFromHex(nativeValue.get.call(input));
+      render();
+    },
+  });
+
+  function trackDrag(element, apply) {
+    let pointerId = null;
+
+    element.addEventListener('pointerdown', (event) => {
+      pointerId = event.pointerId;
+      try {
+        element.setPointerCapture(pointerId);
+      } catch (error) {
+        /* ignore */
+      }
+      apply(event);
+      event.preventDefault();
+    });
+
+    element.addEventListener('pointermove', (event) => {
+      if (pointerId === null || event.pointerId !== pointerId) return;
+      apply(event);
+      event.preventDefault();
+    });
+
+    const end = (event) => {
+      if (pointerId === null || event.pointerId !== pointerId) return;
+      try {
+        element.releasePointerCapture(pointerId);
+      } catch (error) {
+        /* ignore */
+      }
+      pointerId = null;
+    };
+
+    element.addEventListener('pointerup', end);
+    element.addEventListener('pointercancel', end);
+  }
+
+  trackDrag(area, (event) => {
+    const rect = area.getBoundingClientRect();
+    hsv = {
+      h: hsv.h,
+      s: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+      v: 1 - clamp((event.clientY - rect.top) / rect.height, 0, 1),
+    };
+    updateFromHsv();
+  });
+
+  trackDrag(hue, (event) => {
+    const rect = hue.getBoundingClientRect();
+    hsv = {
+      h: clamp((event.clientX - rect.left) / rect.width, 0, 1) * 360,
+      s: hsv.s,
+      v: hsv.v,
+    };
+    updateFromHsv();
+  });
+
+  hexInput.addEventListener('input', () => {
+    const hex = normalizeHex(hexInput.value);
+    if (hex) setFromHex(hex);
+  });
+
+  hexInput.addEventListener('blur', () => {
+    hexInput.value = input.value;
+  });
+
+  hexInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    hexInput.blur();
+  });
+
+  copyBtn.addEventListener('click', async () => {
+    const hex = input.value;
+    try {
+      await navigator.clipboard.writeText(hex);
+      toast(`${hex} copiado.`);
+    } catch (error) {
+      hexInput.focus();
+      hexInput.select();
+      toast('Não foi possível copiar automaticamente.', 'error');
+    }
+  });
+
+  const instance = {
+    root,
+    close() {
+      setOpen(false);
+    },
+  };
+
+  function setOpen(open) {
+    if (open) {
+      if (activePicker && activePicker !== instance) activePicker.close();
+      pop.hidden = false;
+      chip.setAttribute('aria-expanded', 'true');
+      activePicker = instance;
+
+      // Abre para cima quando não há espaço abaixo.
+      pop.classList.remove('picker__pop--up');
+      if (pop.getBoundingClientRect().bottom > window.innerHeight - 8) {
+        pop.classList.add('picker__pop--up');
+      }
+    } else {
+      pop.hidden = true;
+      chip.setAttribute('aria-expanded', 'false');
+      if (activePicker === instance) activePicker = null;
+    }
+  }
+
+  chip.addEventListener('click', () => setOpen(pop.hidden));
+
+  render();
+  return instance;
 }
 
 //#endregion
@@ -430,6 +753,12 @@ function buildNodeVisual(node) {
   circle.setAttribute('r', String(radius));
   circle.setAttribute('fill', node.color);
 
+  if (node.border && node.border.enabled) {
+    group.classList.add('node--bordered');
+    circle.style.setProperty('--node-border', node.border.color);
+    circle.style.setProperty('--node-border-width', String(NODE_BORDER_WIDTH));
+  }
+
   const label = document.createElementNS(SVG_NS, 'text');
   label.setAttribute('class', 'node__label');
   label.setAttribute('text-anchor', 'middle');
@@ -449,8 +778,8 @@ function applyNodeTransform(id) {
 }
 
 function updateConnectionGeometry(conn) {
-  const line = connEls.get(conn.id);
-  if (!line) return;
+  const group = connEls.get(conn.id);
+  if (!group) return;
 
   const source = findNode(conn.sourceId);
   const target = findNode(conn.targetId);
@@ -474,10 +803,18 @@ function updateConnectionGeometry(conn) {
   const startRadius = Math.min(sourceRadius, span / 2);
   const endRadius = Math.min(targetRadius, span / 2);
 
-  line.setAttribute('x1', (source.position.x + ux * startRadius).toFixed(2));
-  line.setAttribute('y1', (source.position.y + uy * startRadius).toFixed(2));
-  line.setAttribute('x2', (target.position.x - ux * endRadius).toFixed(2));
-  line.setAttribute('y2', (target.position.y - uy * endRadius).toFixed(2));
+  const x1 = (source.position.x + ux * startRadius).toFixed(2);
+  const y1 = (source.position.y + uy * startRadius).toFixed(2);
+  const x2 = (target.position.x - ux * endRadius).toFixed(2);
+  const y2 = (target.position.y - uy * endRadius).toFixed(2);
+
+  // A área de clique e a linha visível compartilham a mesma geometria.
+  for (const line of group.children) {
+    line.setAttribute('x1', x1);
+    line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2);
+    line.setAttribute('y2', y2);
+  }
 }
 
 function syncStyles() {
@@ -521,19 +858,39 @@ function renderAll() {
   syncStyles();
 }
 
+function connectionColor(conn) {
+  return conn.color || DEFAULT_CONNECTION_COLOR;
+}
+
 function addConnectionElement(conn) {
+  const group = document.createElementNS(SVG_NS, 'g');
+  group.setAttribute('class', 'connection-group');
+  group.setAttribute('data-id', conn.id);
+
+  const hit = document.createElementNS(SVG_NS, 'line');
+  hit.setAttribute('class', 'connection__hit');
+
   const line = document.createElementNS(SVG_NS, 'line');
   line.setAttribute('class', 'connection');
-  line.setAttribute('data-id', conn.id);
-  connEls.set(conn.id, line);
-  layerConnections.appendChild(line);
+  line.style.stroke = connectionColor(conn);
+
+  group.append(hit, line);
+  connEls.set(conn.id, group);
+  layerConnections.appendChild(group);
   updateConnectionGeometry(conn);
 }
 
 function removeConnectionElement(conn) {
-  const line = connEls.get(conn.id);
-  if (line) line.remove();
+  const group = connEls.get(conn.id);
+  if (group) group.remove();
   connEls.delete(conn.id);
+}
+
+function updateConnectionColor(conn) {
+  const group = connEls.get(conn.id);
+  if (!group) return;
+  const line = group.querySelector('.connection');
+  if (line) line.style.stroke = connectionColor(conn);
 }
 
 function moveNode(id, x, y) {
@@ -605,7 +962,7 @@ function toggleConnection(sourceId, targetId) {
     return { action: 'removed', connection: existing };
   }
 
-  const connection = { id: makeId(), sourceId, targetId };
+  const connection = { id: makeId(), sourceId, targetId, color: DEFAULT_CONNECTION_COLOR };
   state.connections.push(connection);
   toast('Conexão criada.');
   return { action: 'created', connection };
@@ -764,6 +1121,15 @@ function onPointerDown(event) {
 
   const group = event.target.closest ? event.target.closest('.node') : null;
   if (!group) {
+    // Clique na ligação: abre a escolha de cor da linha.
+    const hit = event.target.closest ? event.target.closest('.connection__hit') : null;
+    if (hit && mode === 'edit') {
+      const connGroup = hit.closest('.connection-group');
+      if (connGroup) openConnectionDialog(connGroup.dataset.id);
+      event.preventDefault();
+      return;
+    }
+
     // Clique/arraste fora dos nós: inicia a caixa de seleção no modo de edição.
     if (mode === 'edit') startMarquee(event);
     return;
@@ -949,14 +1315,25 @@ function syncColorSwatches() {
   });
 }
 
+/** Mostra o seletor de cor da borda apenas quando a opção está marcada. */
+function syncBorderField() {
+  borderColorField.hidden = !fieldBorder.checked;
+  const active = fieldBorderColor.value.toLowerCase() === DEFAULT_BORDER_COLOR;
+  borderDefault.classList.toggle('swatch--active', active);
+  borderDefault.setAttribute('aria-pressed', String(active));
+}
+
 function openCreateDialog() {
   editingId = null;
   nodeDialogTitle.textContent = 'Novo nó';
   fieldText.value = '';
   fieldColor.value = DEFAULT_COLOR;
+  fieldBorder.checked = false;
+  fieldBorderColor.value = DEFAULT_BORDER_COLOR;
   btnDelete.hidden = true;
   setFormError('');
   syncColorSwatches();
+  syncBorderField();
   nodeDialog.showModal();
   fieldText.focus();
 }
@@ -971,9 +1348,13 @@ function openEditDialog(id) {
   nodeDialogTitle.textContent = 'Editar nó';
   fieldText.value = node.text;
   fieldColor.value = node.color;
+  const border = node.border || { enabled: false, color: DEFAULT_BORDER_COLOR };
+  fieldBorder.checked = border.enabled === true;
+  fieldBorderColor.value = border.color;
   btnDelete.hidden = false;
   setFormError('');
   syncColorSwatches();
+  syncBorderField();
   syncStyles();
   nodeDialog.showModal();
   fieldText.focus();
@@ -995,12 +1376,17 @@ function submitNodeForm(event) {
   }
 
   const color = fieldColor.value;
+  const border = {
+    enabled: fieldBorder.checked,
+    color: fieldBorderColor.value,
+  };
 
   if (editingId) {
     const node = findNode(editingId);
     if (node) {
       node.text = text;
       node.color = color;
+      node.border = border;
       toast('Nó atualizado.');
     }
   } else {
@@ -1010,6 +1396,7 @@ function submitNodeForm(event) {
       id: makeId(),
       text,
       color,
+      border,
       position,
     });
     toast('Nó criado.');
@@ -1018,6 +1405,37 @@ function submitNodeForm(event) {
   closeNodeDialog();
   save();
   renderAll();
+}
+
+/** Marca o swatch quando a ligação usa a cor de destaque da aplicação. */
+function syncConnectionColor() {
+  const active = fieldConnectionColor.value.toLowerCase() === ACCENT_COLOR;
+  connectionPreset.classList.toggle('swatch--active', active);
+  connectionPreset.setAttribute('aria-pressed', String(active));
+}
+
+function openConnectionDialog(id) {
+  const conn = state.connections.find((item) => item.id === id);
+  if (!conn) return;
+
+  editingConnectionId = id;
+  fieldConnectionColor.value = connectionColor(conn);
+  syncConnectionColor();
+  connectionDialog.showModal();
+}
+
+function submitConnectionForm(event) {
+  event.preventDefault();
+
+  const conn = state.connections.find((item) => item.id === editingConnectionId);
+  if (conn) {
+    conn.color = fieldConnectionColor.value;
+    updateConnectionColor(conn);
+    save();
+    toast('Cor da ligação atualizada.');
+  }
+
+  connectionDialog.close();
 }
 
 async function deleteCurrentNode() {
@@ -1099,6 +1517,10 @@ function exportBoard() {
       id: node.id,
       text: node.text,
       color: node.color,
+      border: {
+        enabled: Boolean(node.border && node.border.enabled),
+        color: (node.border && node.border.color) || DEFAULT_BORDER_COLOR,
+      },
       position: {
         x: Math.round(node.position.x * 100) / 100,
         y: Math.round(node.position.y * 100) / 100,
@@ -1108,6 +1530,7 @@ function exportBoard() {
       id: conn.id,
       sourceId: conn.sourceId,
       targetId: conn.targetId,
+      color: connectionColor(conn),
     })),
   };
 
@@ -1123,6 +1546,175 @@ function exportBoard() {
 
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast('Quadro exportado.');
+}
+
+/** Fator de ampliação do PNG em relação às coordenadas do quadro */
+const PNG_SCALE = 3;
+/** Maior lado do PNG, em pixels (limite de segurança do canvas) */
+const PNG_MAX_SIDE = 8192;
+/** Margem livre em volta dos nós, em coordenadas do quadro */
+const PNG_PADDING = 60;
+
+/**
+ * Estilos aplicados ao SVG exportado: o arquivo gerado não leva o styles.css,
+ * então as regras que dependem de classe precisam ir embutidas. Sem
+ * `vector-effect`, os traços acompanham a ampliação da imagem.
+ */
+const PNG_STYLE = [
+  '.connection { stroke: #7e8a9c; stroke-width: 2; stroke-linecap: round; }',
+  '.connection__hit { stroke: none; }',
+  '.node__circle { stroke: var(--node-border, rgba(255, 255, 255, .16)); stroke-width: var(--node-border-width, 1.5); }',
+  '.node__label { font: 600 13px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;'
+    + ' fill: #fff; paint-order: stroke fill; stroke: rgba(0, 0, 0, .32); stroke-width: 3; stroke-linejoin: round; }',
+].join('\n');
+
+/** Retângulo que envolve todos os nós, em coordenadas do quadro */
+function contentBounds() {
+  const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+  state.nodes.forEach((node) => {
+    const radius = (visual.get(node.id) || {}).radius || NODE_RADIUS;
+    bounds.minX = Math.min(bounds.minX, node.position.x - radius);
+    bounds.minY = Math.min(bounds.minY, node.position.y - radius);
+    bounds.maxX = Math.max(bounds.maxX, node.position.x + radius);
+    bounds.maxY = Math.max(bounds.maxY, node.position.y + radius);
+  });
+
+  return bounds;
+}
+
+/**
+ * Exporta em PNG a área ocupada pelos nós. O enquadramento é independente do
+ * pan e do zoom da tela.
+ *
+ * @param {boolean} [transparent] Sem o fundo do quadro (fundo transparente).
+ */
+function exportPng(transparent) {
+  if (state.nodes.length === 0) {
+    toast('Não há nós para exportar.', 'error');
+    return;
+  }
+
+  const bounds = contentBounds();
+  const minX = bounds.minX - PNG_PADDING;
+  const minY = bounds.minY - PNG_PADDING;
+  const width = bounds.maxX - bounds.minX + PNG_PADDING * 2;
+  const height = bounds.maxY - bounds.minY + PNG_PADDING * 2;
+
+  const clone = board.cloneNode(true);
+
+  const marqueeClone = clone.querySelector('.marquee');
+  if (marqueeClone) marqueeClone.remove();
+
+  const gridClone = clone.querySelector('#layer-grid');
+  if (gridClone) gridClone.remove();
+
+  if (transparent) {
+    const bgClone = clone.querySelector('.board__bg');
+    if (bgClone) bgClone.remove();
+  }
+
+  const style = document.createElementNS(SVG_NS, 'style');
+  style.textContent = PNG_STYLE;
+  clone.insertBefore(style, clone.firstChild);
+
+  // Enquadra os nós: o deslocamento do quadro na tela não entra na imagem.
+  clone.querySelector('#viewport').setAttribute('transform', `translate(${-minX} ${-minY})`);
+
+  clone.setAttribute('width', String(width));
+  clone.setAttribute('height', String(height));
+  clone.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+  const scale = Math.min(PNG_SCALE, PNG_MAX_SIDE / Math.max(width, height));
+
+  const svgUrl = URL.createObjectURL(
+    new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml;charset=utf-8' }),
+  );
+
+  const image = new Image();
+
+  image.onerror = () => {
+    URL.revokeObjectURL(svgUrl);
+    toast('Não foi possível gerar o PNG.', 'error');
+  };
+
+  image.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+
+    const context = canvas.getContext('2d');
+    if (!transparent) {
+      context.fillStyle = '#0e1116';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    context.setTransform(scale, 0, 0, scale, 0, 0);
+    context.drawImage(image, 0, 0, width, height);
+
+    URL.revokeObjectURL(svgUrl);
+
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        toast('Não foi possível gerar o PNG.', 'error');
+        return;
+      }
+
+      const pngUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = pngUrl;
+      link.download = `quadro-nos-${formatDate(new Date())}${transparent ? '-transparente' : ''}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1000);
+      toast(`PNG salvo (${canvas.width}×${canvas.height}).`);
+    }, 'image/png');
+  };
+
+  image.src = svgUrl;
+}
+
+/** Abre ou fecha o menu de opções da exportação PNG */
+function togglePngMenu() {
+  setPngMenuOpen(pngMenu.hidden);
+}
+
+function setPngMenuOpen(open) {
+  pngMenu.hidden = !open;
+  btnPng.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function onPngMenuClick(event) {
+  const item = event.target.closest('.png-menu__item');
+  if (!item) return;
+  setPngMenuOpen(false);
+  exportPng(item.dataset.background === 'transparent');
+}
+
+function onDocumentPointerDown(event) {
+  if (!pngMenu.hidden && !event.target.closest('.png-field')) {
+    setPngMenuOpen(false);
+  }
+  if (activePicker && !activePicker.root.contains(event.target)) {
+    closeActivePicker();
+  }
+}
+
+function onDocumentKeydown(event) {
+  if (event.key !== 'Escape') return;
+
+  if (!pngMenu.hidden) {
+    event.preventDefault();
+    setPngMenuOpen(false);
+    btnPng.focus();
+    return;
+  }
+
+  if (activePicker) {
+    event.preventDefault();
+    closeActivePicker();
+  }
 }
 
 function validateBoard(raw) {
@@ -1172,7 +1764,15 @@ function validateBoard(raw) {
       ? entry.color
       : DEFAULT_COLOR;
 
-    nodes.push({ id, text, color, position: { x: position.x, y: position.y } });
+    const rawBorder = entry.border && typeof entry.border === 'object' ? entry.border : {};
+    const border = {
+      enabled: rawBorder.enabled === true,
+      color: (typeof rawBorder.color === 'string' && /^#[0-9a-f]{6}$/i.test(rawBorder.color))
+        ? rawBorder.color
+        : DEFAULT_BORDER_COLOR,
+    };
+
+    nodes.push({ id, text, color, border, position: { x: position.x, y: position.y } });
   }
 
   const connections = [];
@@ -1204,7 +1804,11 @@ function validateBoard(raw) {
     if (!id || connectionIds.has(id)) id = makeId();
     connectionIds.add(id);
 
-    connections.push({ id, sourceId, targetId });
+    const color = (typeof entry.color === 'string' && /^#[0-9a-f]{6}$/i.test(entry.color))
+      ? entry.color
+      : DEFAULT_CONNECTION_COLOR;
+
+    connections.push({ id, sourceId, targetId, color });
   }
 
   return { data: { nodes, connections } };
@@ -1252,12 +1856,20 @@ function onFileSelected(event) {
 //#region Inicialização
 
 function bindEvents() {
+  createColorPicker(fieldColor);
+  createColorPicker(fieldBorderColor);
+  createColorPicker(fieldConnectionColor);
+
   buildColorSwatches();
 
   btnAdd.addEventListener('click', openCreateDialog);
   btnMode.addEventListener('click', () => setMode(mode === 'edit' ? 'connect' : 'edit'));
   btnExport.addEventListener('click', exportBoard);
   btnImport.addEventListener('click', () => fileInput.click());
+  btnPng.addEventListener('click', togglePngMenu);
+  pngMenu.addEventListener('click', onPngMenuClick);
+  document.addEventListener('pointerdown', onDocumentPointerDown);
+  document.addEventListener('keydown', onDocumentKeydown);
   btnGrid.addEventListener('click', () => setGrid(!gridEnabled));
   btnDeleteSelected.addEventListener('click', deleteSelectedNodes);
   fileInput.addEventListener('change', onFileSelected);
@@ -1268,6 +1880,13 @@ function bindEvents() {
   board.addEventListener('wheel', onWheel, { passive: false });
 
   nodeForm.addEventListener('submit', submitNodeForm);
+  fieldBorder.addEventListener('change', syncBorderField);
+  fieldBorderColor.addEventListener('input', syncBorderField);
+  borderDefault.style.setProperty('--swatch', DEFAULT_BORDER_COLOR);
+  borderDefault.addEventListener('click', () => {
+    fieldBorderColor.value = DEFAULT_BORDER_COLOR;
+    syncBorderField();
+  });
   btnDelete.addEventListener('click', deleteCurrentNode);
   btnCancel.addEventListener('click', closeNodeDialog);
   dialogClose.addEventListener('click', closeNodeDialog);
@@ -1275,7 +1894,22 @@ function bindEvents() {
     editingId = null;
     selectedId = null;
     btnDelete.hidden = true;
+    closeActivePicker();
     syncStyles();
+  });
+
+  connectionForm.addEventListener('submit', submitConnectionForm);
+  fieldConnectionColor.addEventListener('input', syncConnectionColor);
+  connectionPreset.style.setProperty('--swatch', ACCENT_COLOR);
+  connectionPreset.addEventListener('click', () => {
+    fieldConnectionColor.value = ACCENT_COLOR;
+    syncConnectionColor();
+  });
+  connectionCancel.addEventListener('click', () => connectionDialog.close());
+  connectionClose.addEventListener('click', () => connectionDialog.close());
+  connectionDialog.addEventListener('close', () => {
+    editingConnectionId = null;
+    closeActivePicker();
   });
 
   board.addEventListener('pointerdown', onPointerDown);
