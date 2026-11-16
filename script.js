@@ -38,6 +38,9 @@ const FONT_SIZE = 13;
 const NODE_RADIUS = 46;
 const DRAG_THRESHOLD = 4;
 
+/** Distância entre a origem e cada cópia colada (Ctrl+C / Ctrl+V) */
+const PASTE_OFFSET = 70;
+
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 1.25;
@@ -72,6 +75,9 @@ let gridEnabled = false;  // grade em anéis ativa (com encaixe dos nós)
 
 /** Ids dos nós selecionados pela caixa de seleção */
 const selectedIds = new Set();
+
+/** Conteúdo copiado (Ctrl+C): nós, ligações entre eles e nº de colagens */
+let clipboard = null;
 
 /** Transformação do quadro: escala (k) e deslocamento (tx, ty) em pixels de tela */
 const view = { k: 1, tx: 0, ty: 0 };
@@ -149,6 +155,14 @@ function measureText(text) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+/** Indica se o foco está em um campo que usa os atalhos nativos de texto. */
+function isTextEntry(element) {
+  if (!element || element.nodeType !== 1) return false;
+  if (element.isContentEditable === true) return true;
+  const tag = element.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
 /** Converte "#rrggbb" em canais { r, g, b } (0–255). */
@@ -1093,6 +1107,138 @@ async function deleteSelectedNodes() {
   toast(total > 1 ? 'Nós excluídos.' : 'Nó excluído.');
 }
 
+/**
+ * Tecla Delete (ou Backspace, como envia o teclado do macOS) exclui os nós
+ * selecionados. A confirmação é a mesma exibida pelo botão de excluir.
+ */
+function handleDeleteShortcut(event) {
+  if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+  if (mode !== 'edit') return;
+  if (nodeDialog.open || connectionDialog.open || confirmEl.open) return;
+  if (isTextEntry(event.target)) return;
+  if (selectedIds.size === 0) return;
+
+  event.preventDefault();
+  deleteSelectedNodes();
+}
+
+//#endregion
+
+//#region Área de transferência (copiar e colar nós)
+
+/**
+ * Copia os nós selecionados junto das ligações existentes entre eles.
+ * As posições são guardadas como estão; o deslocamento é aplicado na colagem.
+ *
+ * @returns {boolean} Se algo foi copiado.
+ */
+function copySelection() {
+  const nodes = [];
+  const slot = new Map();
+
+  selectedIds.forEach((id) => {
+    const node = findNode(id);
+    if (!node) return;
+
+    slot.set(id, nodes.length);
+    nodes.push({
+      text: node.text,
+      color: node.color,
+      border: {
+        enabled: Boolean(node.border && node.border.enabled),
+        color: (node.border && node.border.color) || DEFAULT_BORDER_COLOR,
+      },
+      position: { x: node.position.x, y: node.position.y },
+    });
+  });
+
+  if (nodes.length === 0) {
+    toast('Selecione ao menos um nó para copiar.', 'error');
+    return false;
+  }
+
+  // Só acompanham as ligações entre dois nós copiados.
+  const connections = [];
+  state.connections.forEach((conn) => {
+    if (!slot.has(conn.sourceId) || !slot.has(conn.targetId)) return;
+    connections.push({
+      source: slot.get(conn.sourceId),
+      target: slot.get(conn.targetId),
+      color: connectionColor(conn),
+    });
+  });
+
+  clipboard = { nodes, connections, pastes: 0 };
+  toast(nodes.length > 1 ? `${nodes.length} nós copiados.` : 'Nó copiado.');
+  return true;
+}
+
+/**
+ * Cola os nós copiados, afastando o conjunto a cada nova colagem.
+ * Os nós colados ficam selecionados.
+ *
+ * @returns {boolean} Se algo foi colado.
+ */
+function pasteClipboard() {
+  if (!clipboard) {
+    toast('Nada foi copiado ainda.', 'error');
+    return false;
+  }
+
+  clipboard.pastes += 1;
+  const delta = PASTE_OFFSET * clipboard.pastes;
+
+  const created = [];
+  const pasted = new Map();
+
+  clipboard.nodes.forEach((source, position) => {
+    const node = {
+      id: makeId(),
+      text: source.text,
+      color: source.color,
+      border: { enabled: source.border.enabled, color: source.border.color },
+      position: { x: source.position.x + delta, y: source.position.y + delta },
+    };
+
+    pasted.set(position, node.id);
+    created.push(node);
+    state.nodes.push(node);
+  });
+
+  clipboard.connections.forEach((conn) => {
+    const sourceId = pasted.get(conn.source);
+    const targetId = pasted.get(conn.target);
+    if (!sourceId || !targetId) return;
+    state.connections.push({ id: makeId(), sourceId, targetId, color: conn.color });
+  });
+
+  selectedIds.clear();
+  created.forEach((node) => selectedIds.add(node.id));
+
+  save();
+  renderAll();
+  toast(created.length > 1 ? `${created.length} nós colados.` : 'Nó colado.');
+  return true;
+}
+
+/**
+ * Atalhos Ctrl+C e Ctrl+V (⌘ no macOS) para os nós selecionados.
+ */
+function handleClipboardShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+  if (mode !== 'edit') return;
+  if (nodeDialog.open || connectionDialog.open || confirmEl.open) return;
+  if (isTextEntry(event.target)) return;
+
+  const key = event.key.toLowerCase();
+  if (key === 'c') {
+    if (copySelection()) event.preventDefault();
+  } else if (key === 'v') {
+    if (pasteClipboard()) event.preventDefault();
+  }
+}
+
 //#endregion
 
 //#region Arraste (Pointer Events)
@@ -1702,7 +1848,11 @@ function onDocumentPointerDown(event) {
 }
 
 function onDocumentKeydown(event) {
-  if (event.key !== 'Escape') return;
+  if (event.key !== 'Escape') {
+    handleClipboardShortcut(event);
+    handleDeleteShortcut(event);
+    return;
+  }
 
   if (!pngMenu.hidden) {
     event.preventDefault();
