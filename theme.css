@@ -1,0 +1,99 @@
+/* ============================================================
+   Tema genérico — paleta compartilhada por todas as ferramentas
+   Base: cores do projeto ÁrvoreNós
+   ============================================================ */
+
+:root {
+  /* Superfícies e texto */
+  --bg: #0e1116;
+  --surface: #171b23;
+  --surface-2: #1e232c;
+  --border: #2a303b;
+  --border-strong: #3a424f;
+  --text: #e9edf3;
+  --muted: #98a1b0;
+
+  /* Destaque */
+  --accent: #e8873c;
+  --accent-hover: #f1995a;
+  --accent-ink: #1b1206;
+  --accent-soft: rgba(232, 135, 60, .16);
+
+  /* Perigo */
+  --danger: #e5484d;
+  --danger-soft: rgba(229, 72, 77, .18);
+  --danger-border: rgba(229, 72, 77, .45);
+
+  /* Elementos */
+  --connection: #7e8a9c;
+  --shadow: 0 18px 42px rgba(0, 0, 0, .5);
+
+  /* Áreas seguras (entalhes de tela) */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* ============================================================
+   Componente de botão — aparência compartilhada pelas ferramentas
+   ============================================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+.btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+a.btn {
+  text-decoration: none;
+}
+
+.btn:hover {
+  background: #262c37;
+}
+
+.btn--ghost {
+  background: rgba(23, 27, 35, .85);
+  backdrop-filter: blur(6px);
+}
+
+.btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn--primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn--danger {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: rgba(229, 72, 77, .08);
+}
+
+.btn--danger:hover {
+  background: var(--danger-soft);
+}

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Montador de Masmorras</title>
+  <link rel="stylesheet" href="../theme.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-tool="room">
+
+  <header class="toolbar">
+    <a class="btn btn--ghost" href="../index.html" title="Voltar ao hub de ferramentas">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      Hub
+    </a>
+    <button type="button" class="btn btn--ghost" id="btn-export" title="Salvar o mapa em um arquivo JSON">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      Exportar
+    </button>
+    <button type="button" class="btn btn--ghost" id="btn-import" title="Carregar um mapa a partir de um arquivo JSON">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      Importar
+    </button>
+
+    <div class="toolbar__tools" role="toolbar" aria-label="Ferramentas de edição">
+      <button type="button" class="btn" data-tool="room" aria-pressed="true">Criar sala</button>
+      <button type="button" class="btn" data-tool="door" aria-pressed="false">Adicionar porta</button>
+      <button type="button" class="btn" data-tool="connect" aria-pressed="false">Conectar</button>
+    </div>
+
+    <button type="button" class="btn btn--danger" id="btn-clear">Limpar mapa</button>
+  </header>
+
+  <main class="workspace" id="workspace">
+    <div class="stage" id="stage">
+      <div class="world" id="world">
+        <div class="grid-bg" aria-hidden="true"></div>
+        <div class="layer" id="layer-rooms"></div>
+        <div class="layer" id="layer-corridors"></div>
+        <div class="layer" id="layer-walls"></div>
+        <div class="layer" id="layer-doors"></div>
+        <div class="layer" id="layer-preview"></div>
+      </div>
+    </div>
+  </main>
+
+  <div class="controls">
+    <div class="generator">
+      <label class="generator__label" for="room-count">Salas</label>
+      <input class="generator__input" id="room-count" type="number" min="1" max="60" step="1" value="6">
+      <button type="button" class="generator__button" id="btn-generate">GERAR MASMORRA</button>
+    </div>
+    <div class="zoom" role="group" aria-label="Zoom do mapa">
+      <button type="button" class="zoom__btn" id="btn-zoom-out" aria-label="Reduzir zoom" title="Reduzir zoom">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button type="button" class="zoom__level" id="btn-zoom-reset" aria-label="Restaurar zoom para 100%" title="Restaurar zoom">100%</button>
+      <button type="button" class="zoom__btn" id="btn-zoom-in" aria-label="Aumentar zoom" title="Aumentar zoom">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <input type="file" id="file-input" accept=".json,application/json" hidden>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

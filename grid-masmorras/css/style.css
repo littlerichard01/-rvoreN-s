@@ -1,0 +1,333 @@
+/* ============================================================
+   Montador de Masmorras — aparência da interface (tema escuro)
+   ============================================================ */
+
+:root {
+  /* Métricas do grid */
+  --cell: 28px;
+  --wall-thickness: 4px;
+  --door-thickness: 7px;
+
+  /* Cores de domínio (masmorra) */
+  --room: #3d3428;
+  --corridor: #6b5836;
+  --wall: #c2a47c;
+  --door: #e6a13a;
+
+  /* Apelidos locais para os tokens genéricos de ../theme.css */
+  --bg-page: var(--bg);
+  --bg-bar: var(--surface);
+  --bg-grid: var(--bg);
+  --grid-line: var(--border);
+  --ink: var(--text);
+  --ink-soft: var(--muted);
+  --line: var(--border);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-page);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* ============================================================
+   Barra de ferramentas
+   ============================================================ */
+
+.toolbar {
+  position: absolute;
+  top: calc(14px + var(--safe-top));
+  left: calc(14px + var(--safe-left));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 28px - var(--safe-left) - var(--safe-right));
+  z-index: 5;
+}
+
+.toolbar__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ============================================================
+   Área de edição
+   ============================================================ */
+
+.workspace {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--bg-grid);
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: crosshair;
+}
+
+.stage.stage--panning {
+  cursor: grabbing;
+}
+
+/* Mundo deslocável: grade "infinita" + camadas do mapa, movidos juntos pelo pan */
+.world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.grid-bg {
+  position: absolute;
+  left: -10080px; /* múltiplo de --cell (28px): alinha as linhas à origem do mapa */
+  top: -10080px;
+  width: 20160px;
+  height: 20160px;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 0 1px, transparent 1px);
+  background-size: var(--cell) var(--cell);
+}
+
+body[data-tool="door"] .stage {
+  cursor: pointer;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* --- Elementos do mapa --- */
+
+.room {
+  position: absolute;
+  background: var(--room);
+}
+
+.corridor-cell {
+  position: absolute;
+  background: var(--corridor);
+}
+
+/* --- Paredes e portas --- */
+
+.seg {
+  position: absolute;
+  background: var(--wall);
+  border-radius: 2px;
+}
+
+.seg-h {
+  height: var(--wall-thickness);
+  width: var(--cell);
+  transform: translateY(-50%);
+}
+
+.seg-v {
+  width: var(--wall-thickness);
+  height: var(--cell);
+  transform: translateX(-50%);
+}
+
+.seg.is-door {
+  background: var(--door);
+}
+
+.seg.is-door.seg-h {
+  height: var(--door-thickness);
+}
+
+.seg.is-door.seg-v {
+  width: var(--door-thickness);
+}
+
+.seg.is-hover {
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+/* --- Pré-visualização --- */
+
+.preview-room {
+  position: absolute;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.preview-room.is-invalid {
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 2px var(--danger);
+}
+
+.preview-cell {
+  position: absolute;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.preview-cell.is-invalid {
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+/* ============================================================
+   Controles de zoom (canto inferior direito)
+   ============================================================ */
+
+.controls {
+  position: absolute;
+  right: calc(14px + var(--safe-right));
+  bottom: calc(14px + var(--safe-bottom));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  max-width: calc(100vw - 28px);
+  z-index: 5;
+}
+
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .35);
+}
+
+.zoom__btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.zoom__btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.zoom__btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.zoom__level {
+  min-width: 52px;
+  height: 34px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.zoom__level:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.zoom__btn:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+/* ============================================================
+   Geração aleatória (à esquerda dos controles de zoom)
+   ============================================================ */
+
+.generator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(23, 27, 35, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.generator__label {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.generator__input {
+  width: 62px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-grid);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.generator__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Botão primário, como .btn--primary do ÁrvoreNós */
+.generator__button {
+  padding: 9px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: background .15s ease;
+}
+
+.generator__button:hover {
+  background: var(--accent-hover);
+}

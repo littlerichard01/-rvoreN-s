@@ -35,13 +35,16 @@ Não deverá existir dependência obrigatória de frameworks, bibliotecas extern
 
 A estrutura deverá permitir que os arquivos sejam publicados diretamente em um repositório do GitHub e disponibilizados por meio do GitHub Pages.
 
-A organização inicial dos arquivos poderá seguir o seguinte modelo:
+A aplicação é uma das ferramentas do hub e fica em sua própria pasta. A organização dos arquivos segue o modelo:
 
 ```text
-/
-├── index.html
-├── styles.css
-└── script.js
+/                          (raiz do repositório / hub)
+├── index.html             (hub de ferramentas)
+├── theme.css              (paleta genérica compartilhada)
+└── arvore-nos/            (esta ferramenta)
+    ├── index.html
+    ├── styles.css
+    └── script.js
 ```
 
 Todos os recursos necessários à execução da aplicação deverão ser carregados diretamente pelo navegador.
