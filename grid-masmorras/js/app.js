@@ -9,7 +9,7 @@
   const EDGE_TOL = 9;        // distância (px) para reconhecer a parede sob o cursor
   const HISTORY_LIMIT = 60;  // quantidade de estados guardados para desfazer
   const MIN_CELLS = 4;       // mínimo de colunas e linhas em telas muito pequenas
-  const MAX_ROOMS = 60;      // limite de salas na geração aleatória
+  const MAX_ROOMS = 200;     // limite de salas na geração aleatória
 
   // Limites e passo do zoom (mesmos valores da ferramenta de nós)
   const MIN_ZOOM = 0.4;
@@ -29,6 +29,7 @@
   const layerCorridors = document.getElementById('layer-corridors');
   const layerWalls = document.getElementById('layer-walls');
   const layerDoors = document.getElementById('layer-doors');
+  const layerMarkers = document.getElementById('layer-markers');
   const layerPreview = document.getElementById('layer-preview');
   const clearButton = document.getElementById('btn-clear');
   const exportButton = document.getElementById('btn-export');
@@ -39,6 +40,15 @@
   const btnZoomIn = document.getElementById('btn-zoom-in');
   const btnZoomOut = document.getElementById('btn-zoom-out');
   const btnZoomReset = document.getElementById('btn-zoom-reset');
+  const markerDialog = document.getElementById('marker-dialog');
+  const markerForm = document.getElementById('marker-form');
+  const markerDialogTitle = document.getElementById('marker-dialog-title');
+  const markerLabelInput = document.getElementById('marker-label');
+  const markerColorInput = document.getElementById('marker-color');
+  const markerSwatches = document.getElementById('marker-swatches');
+  const markerDeleteBtn = document.getElementById('marker-delete');
+  const markerCloseBtn = document.getElementById('marker-close');
+  const markerCancelBtn = document.getElementById('marker-cancel');
   const toolButtons = Array.prototype.slice.call(document.querySelectorAll('[data-tool]'));
   // #endregion
 
@@ -49,6 +59,7 @@
     doors: new Set(),        // chaves de segmentos que estão no estado porta
     openings: new Set(),     // chaves de segmentos abertos por corredores (sem porta)
     connections: [],         // { id, from, to, cells: [{ c, r }] }
+    markers: [],             // { id, c, r, color, label }
     wallSegments: new Set(), // chaves de todos os segmentos de parede atuais
     wallMap: new Map(),      // chave do segmento -> id da sala
     hoverKey: null,
@@ -64,6 +75,13 @@
   // #region Utilitários
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
+  }
+
+  // Protege o texto do marcador antes de injetá-lo no HTML
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+    });
   }
   // #endregion
 
@@ -357,7 +375,8 @@
       rooms: state.rooms,
       doors: Array.from(state.doors),
       openings: Array.from(state.openings),
-      connections: state.connections
+      connections: state.connections,
+      markers: state.markers
     });
   }
 
@@ -372,6 +391,7 @@
     state.doors = new Set(data.doors);
     state.openings = new Set(data.openings || []);
     state.connections = data.connections;
+    state.markers = data.markers || [];
     state.nextId = nextIdFromState();
     state.hoverKey = null;
     state.drag = null;
@@ -383,6 +403,7 @@
     let max = 0;
     for (let i = 0; i < state.rooms.length; i++) max = Math.max(max, state.rooms[i].id);
     for (let i = 0; i < state.connections.length; i++) max = Math.max(max, state.connections[i].id);
+    for (let i = 0; i < state.markers.length; i++) max = Math.max(max, state.markers[i].id);
     return max + 1;
   }
 
@@ -394,7 +415,9 @@
 
   // #region Alterações no mapa
   function placeRoom(rect) {
-    state.rooms.push({ id: state.nextId++, x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+    const room = { id: state.nextId++, x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+    state.rooms.push(room);
+    return room;
   }
 
   function addRoom(rect) {
@@ -417,7 +440,10 @@
   function openWallsAlongPath(cells) {
     for (let i = 0; i < cells.length - 1; i++) {
       const key = edgeBetween(cells[i], cells[i + 1]);
-      if (key && state.wallMap.has(key)) state.openings.add(key);
+      if (key && state.wallMap.has(key)) {
+        state.openings.add(key);
+        state.doors.delete(key); // a porta dá lugar à passagem aberta
+      }
     }
   }
 
@@ -448,15 +474,63 @@
     state.doors.clear();
     state.openings.clear();
     state.connections = [];
+    state.markers = [];
     state.hoverKey = null;
     state.drag = null;
     renderAll();
   }
   // #endregion
 
+  // #region Marcadores
+  function findMarkerAt(c, r) {
+    for (let i = 0; i < state.markers.length; i++) {
+      if (state.markers[i].c === c && state.markers[i].r === r) return state.markers[i];
+    }
+    return null;
+  }
+
+  function findMarkerById(id) {
+    for (let i = 0; i < state.markers.length; i++) {
+      if (state.markers[i].id === id) return state.markers[i];
+    }
+    return null;
+  }
+
+  function placeMarker(c, r, color, label) {
+    const marker = { id: state.nextId++, c: c, r: r, color: color, label: label };
+    state.markers.push(marker);
+    return marker;
+  }
+
+  function removeMarker(id) {
+    for (let i = 0; i < state.markers.length; i++) {
+      if (state.markers[i].id === id) {
+        state.markers.splice(i, 1);
+        return true;
+      }
+    }
+    return false;
+  }
+  // #endregion
+
   // #region Geração aleatória
-  const PLACE_ATTEMPTS = 40;   // tentativas para encaixar cada sala nova
   const DOOR_CHANCE = 0.5;     // proporção de passagens com porta (as demais ficam abertas)
+
+  // Direções em células: leste, sul, oeste e norte (a marcha inicial é para leste)
+  const DIRS = [
+    { dc: 1, dr: 0 },
+    { dc: 0, dr: 1 },
+    { dc: -1, dr: 0 },
+    { dc: 0, dr: -1 }
+  ];
+
+  function turnLeft(dir) {
+    return (dir + 3) % 4;
+  }
+
+  function turnRight(dir) {
+    return (dir + 1) % 4;
+  }
 
   function randomInt(min, max) {
     return min + Math.floor(Math.random() * (max - min + 1));
@@ -480,62 +554,94 @@
     return false;
   }
 
-  // Candidata a sala encostada na sala "parent", junto com a aresta compartilhada
-  function randomAdjacentRoom(parent, maxW, maxH) {
-    const dir = randomInt(0, 3); // 0 leste, 1 oeste, 2 sul, 3 norte
-    let w = randomInt(2, maxW);
-    let h = randomInt(2, maxH);
-    if (Math.random() < 0.25) { // sala fina, no formato de um corredor
-      if (Math.random() < 0.5) h = 1; else w = 1;
+  // Layout da sala (1d4): quantidade e disposição das passagens novas, além da entrada
+  function rollExits(heading) {
+    const front = heading;
+    const left = turnLeft(heading);
+    const right = turnRight(heading);
+    const roll = randomInt(1, 4);
+    if (roll === 1) return [front];         // corredor simples: segue em frente
+    if (roll === 2) return [front, front];  // bifurcação à frente: duas salas distintas
+    if (roll === 3) return [left, right];   // duas portas novas: esquerda e direita
+    return [left, right, front];            // três caminhos: esquerda, direita e frente
+  }
+
+  // Tamanho/forma da sala (1d4): de cômodos pequenos a corredores, com o lado maior ao longo da marcha
+  function rollRoomSize(heading) {
+    const horizontal = heading === 0 || heading === 2;
+    const roll = randomInt(1, 4);
+    if (roll === 1) return { w: 1, h: 1 };                                // cômodo mínimo
+    if (roll === 2) return horizontal ? { w: 2, h: 1 } : { w: 1, h: 2 };  // cômodo curto
+    if (roll === 3) return horizontal ? { w: 3, h: 1 } : { w: 1, h: 3 };  // cômodo comprido
+    // cômodo quadrado pequeno ou corredor longo
+    return Math.random() < 0.5
+      ? { w: 2, h: 2 }
+      : (horizontal ? { w: 4, h: 1 } : { w: 1, h: 4 });
+  }
+
+  // Tenta encaixar uma sala nova encostada na sala "parent", na direção indicada.
+  // Devolve a sala criada ou null quando a disposição não cabe (recurso "impossível").
+  function placeAdjacent(parent, dir, size, maxC, maxR) {
+    const vector = DIRS[dir];
+    const candidates = [];
+
+    if (vector.dc !== 0) {
+      const x = vector.dc === 1 ? parent.x + parent.w : parent.x - size.w;
+      const lo = parent.y - size.h + 1;
+      const hi = parent.y + parent.h - 1;
+      for (let o = lo; o <= hi; o++) candidates.push({ x: x, y: o, w: size.w, h: size.h });
+    } else {
+      const y = vector.dr === 1 ? parent.y + parent.h : parent.y - size.h;
+      const lo = parent.x - size.w + 1;
+      const hi = parent.x + parent.w - 1;
+      for (let o = lo; o <= hi; o++) candidates.push({ x: o, y: y, w: size.w, h: size.h });
     }
 
-    const px2 = parent.x + parent.w;
-    const py2 = parent.y + parent.h;
+    // prefere o encaixe mais próximo do centro da parede compartilhada
+    const center = vector.dc !== 0
+      ? parent.y + (parent.h - 1) / 2
+      : parent.x + (parent.w - 1) / 2;
+    candidates.sort(function (a, b) {
+      const oa = vector.dc !== 0 ? a.y : a.x;
+      const ob = vector.dc !== 0 ? b.y : b.x;
+      return Math.abs(oa - center) - Math.abs(ob - center);
+    });
 
-    if (dir === 0 || dir === 1) {
-      const lo = Math.max(parent.y - h + 1, 0);
-      const hi = py2 - 1;
+    for (let i = 0; i < candidates.length; i++) {
+      const rect = candidates[i];
+      if (!fitsInGrid(rect, maxC, maxR)) continue;
+      if (overlapsAny(rect)) continue;
+      return placeRoom(rect);
+    }
+    return null;
+  }
+
+  // Chave da aresta compartilhada entre duas salas encostadas (uma passagem no meio)
+  function sharedEdgeKey(parent, child, dir) {
+    if (dir === 0 || dir === 2) {
+      const lo = Math.max(parent.y, child.y);
+      const hi = Math.min(parent.y + parent.h, child.y + child.h) - 1;
       if (hi < lo) return null;
-      const y = randomInt(lo, hi);
-      const x = dir === 0 ? px2 : parent.x - w;
-      return {
-        rect: { x: x, y: y, w: w, h: h },
-        edge: {
-          axis: 'v',
-          fixed: dir === 0 ? px2 : parent.x,
-          lo: Math.max(parent.y, y),
-          hi: Math.min(py2, y + h) - 1
-        }
-      };
+      const x = dir === 0 ? child.x : parent.x;
+      return 'v:' + x + ':' + Math.floor((lo + hi) / 2);
     }
-
-    const lo = Math.max(parent.x - w + 1, 0);
-    const hi = px2 - 1;
+    const lo = Math.max(parent.x, child.x);
+    const hi = Math.min(parent.x + parent.w, child.x + child.w) - 1;
     if (hi < lo) return null;
-    const x = randomInt(lo, hi);
-    const y = dir === 2 ? py2 : parent.y - h;
-    return {
-      rect: { x: x, y: y, w: w, h: h },
-      edge: {
-        axis: 'h',
-        fixed: dir === 2 ? py2 : parent.y,
-        lo: Math.max(parent.x, x),
-        hi: Math.min(px2, x + w) - 1
-      }
-    };
+    const y = dir === 1 ? child.y : parent.y;
+    return 'h:' + Math.floor((lo + hi) / 2) + ':' + y;
   }
 
-  // Abre a passagem na aresta compartilhada: uma porta ou uma abertura livre
-  function applyPassage(edge) {
-    const pos = randomInt(edge.lo, edge.hi);
-    const key = edge.axis === 'v'
-      ? 'v:' + edge.fixed + ':' + pos
-      : 'h:' + pos + ':' + edge.fixed;
-    if (!state.wallMap.has(key)) return;
-    if (Math.random() < DOOR_CHANCE) state.doors.add(key);
-    else state.openings.add(key);
+  // Os dois segmentos de parede vizinhos na mesma linha (os "lados" de um mesmo trecho)
+  function wallSides(key) {
+    const seg = parseKey(key);
+    if (seg.dir === 'v') {
+      return ['v:' + seg.c + ':' + (seg.r - 1), 'v:' + seg.c + ':' + (seg.r + 1)];
+    }
+    return ['h:' + (seg.c - 1) + ':' + seg.r, 'h:' + (seg.c + 1) + ':' + seg.r];
   }
 
+  // Marcha de masmorra: cresce sala a sala a partir da entrada, aplicando os dois d4
   function generateDungeon(total) {
     pushHistory();
 
@@ -547,40 +653,61 @@
     state.hoverKey = null;
     state.drag = null;
 
-    // usa apenas colunas/linhas inteiras, para nenhuma sala ficar cortada na borda
-    const boundCols = Math.max(2, cols - 1);
-    const boundRows = Math.max(2, rows - 1);
-    const maxW = Math.max(2, Math.min(8, boundCols - 2));
-    const maxH = Math.max(2, Math.min(6, boundRows - 2));
+    // As margens de encaixe crescem com o número de salas pedido, para que a
+    // marcha consiga distribuir todas elas em vez de esbarrar cedo no limite.
+    const span = Math.max(24, Math.ceil(Math.sqrt(total) * 7));
+    const boundCols = Math.max(cols, span);
+    const boundRows = Math.max(rows, span);
 
-    // primeira sala
-    const w0 = randomInt(2, maxW);
-    const h0 = randomInt(2, maxH);
-    placeRoom({
-      x: randomInt(1, Math.max(1, boundCols - 1 - w0)),
-      y: randomInt(1, Math.max(1, boundRows - 1 - h0)),
-      w: w0,
-      h: h0
-    });
+    const startCol = 2;
+    const startRow = Math.max(2, Math.min(Math.floor(boundRows / 2), boundRows - 3));
 
-    // as demais salas encostam em alguma já existente, formando um conjunto único
+    // A entrada começa à esquerda, no meio; a marcha inicial é para leste
+    const entrance = placeRoom({ x: startCol, y: startRow, w: 2, h: 2 });
+    const frontier = [{ room: entrance, heading: 0 }];
     const passages = [];
-    for (let i = 1; i < total; i++) {
-      let chosen = null;
-      for (let attempt = 0; attempt < PLACE_ATTEMPTS && !chosen; attempt++) {
-        const parent = state.rooms[randomInt(0, state.rooms.length - 1)];
-        const candidate = randomAdjacentRoom(parent, maxW, maxH);
-        if (candidate && fitsInGrid(candidate.rect, boundCols, boundRows) && !overlapsAny(candidate.rect)) {
-          chosen = candidate;
-        }
+    let placed = 1;
+
+    while (frontier.length > 0 && placed < total) {
+      const current = frontier.shift();
+      const exits = rollExits(current.heading);
+
+      for (let i = 0; i < exits.length && placed < total; i++) {
+        const size = rollRoomSize(exits[i]);
+        const child = placeAdjacent(current.room, exits[i], size, boundCols, boundRows);
+        if (!child) continue; // disposição impossível: o ramo é abandonado
+
+        const key = sharedEdgeKey(current.room, child, exits[i]);
+        if (key) passages.push(key);
+        placed++;
+        frontier.push({ room: child, heading: exits[i] });
       }
-      if (!chosen) break;
-      placeRoom(chosen.rect);
-      passages.push(chosen.edge);
     }
 
     rebuildWalls();
-    for (let i = 0; i < passages.length; i++) applyPassage(passages[i]);
+
+    // Abre as passagens encostadas aplicando as regras de portas:
+    //   1) randomiza entre porta e conexão aberta;
+    //   2) porta não pode ficar ao lado de outra porta — vira parede;
+    //   3) porta ao lado de uma conexão vira conexão, alargando a passagem.
+    for (let i = 0; i < passages.length; i++) {
+      const key = passages[i];
+      if (!state.wallMap.has(key)) continue;
+
+      const sides = wallSides(key);
+      let besideDoor = false;
+      let besideOpening = false;
+      for (let s = 0; s < sides.length; s++) {
+        if (state.doors.has(sides[s])) besideDoor = true;
+        if (state.openings.has(sides[s])) besideOpening = true;
+      }
+
+      if (besideDoor) continue;                             // regra 2: encosta em porta -> deixa parede
+      if (besideOpening) { state.openings.add(key); continue; } // regra 3: alarga a passagem
+
+      if (Math.random() < DOOR_CHANCE) state.doors.add(key); // regra 1: porta
+      else state.openings.add(key);
+    }
 
     applyGridSize();
     renderAll();
@@ -593,7 +720,8 @@
       version: 1,
       rooms: state.rooms,
       doors: Array.from(state.doors),
-      connections: state.connections
+      connections: state.connections,
+      markers: state.markers
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -655,12 +783,27 @@
       }
     }
 
+    const markers = [];
+    if (Array.isArray(data.markers)) {
+      for (let i = 0; i < data.markers.length; i++) {
+        const marker = data.markers[i];
+        if (!marker || !isInteger(marker.c) || !isInteger(marker.r)) continue;
+        markers.push({
+          c: marker.c,
+          r: marker.r,
+          color: typeof marker.color === 'string' ? marker.color : '#e8873c',
+          label: typeof marker.label === 'string' ? marker.label : ''
+        });
+      }
+    }
+
     pushHistory();
 
     state.rooms = [];
     state.doors.clear();
     state.openings.clear();
     state.connections = [];
+    state.markers = [];
     state.nextId = 1;
     state.hoverKey = null;
     state.drag = null;
@@ -682,7 +825,11 @@
     }
 
     for (let i = 0; i < doors.length; i++) {
-      if (state.wallMap.has(doors[i])) state.doors.add(doors[i]);
+      if (state.wallMap.has(doors[i]) && !state.openings.has(doors[i])) state.doors.add(doors[i]);
+    }
+
+    for (let i = 0; i < markers.length; i++) {
+      placeMarker(markers[i].c, markers[i].r, markers[i].color, markers[i].label);
     }
 
     applyGridSize();
@@ -726,8 +873,9 @@
     state.wallMap = map;
 
     // remove portas que não correspondem mais a um segmento de parede
+    // (ou que foram abertas por uma conexão — a passagem tem prioridade)
     state.doors.forEach(function (key) {
-      if (!segments.has(key)) state.doors.delete(key);
+      if (!segments.has(key) || state.openings.has(key)) state.doors.delete(key);
     });
 
     // remove aberturas que não correspondem mais a um segmento de parede
@@ -786,6 +934,19 @@
     layerDoors.innerHTML = html;
   }
 
+  function renderMarkers() {
+    let html = '';
+    for (let i = 0; i < state.markers.length; i++) {
+      const marker = state.markers[i];
+      const label = marker.label
+        ? '<span class="marker__label">' + escapeHtml(marker.label) + '</span>'
+        : '';
+      html += '<div class="marker" style="left:' + (marker.c * CELL) + 'px;top:' + (marker.r * CELL) +
+        'px;--marker:' + marker.color + '"><span class="marker__dot"></span>' + label + '</div>';
+    }
+    layerMarkers.innerHTML = html;
+  }
+
   function renderRoomPreview(rect, valid) {
     layerPreview.innerHTML = '<div class="preview-room' + (valid ? '' : ' is-invalid') +
       '" style="left:' + (rect.x * CELL) + 'px;top:' + (rect.y * CELL) +
@@ -812,6 +973,7 @@
     renderCorridors();
     renderWalls();
     renderDoors();
+    renderMarkers();
   }
   // #endregion
 
@@ -888,6 +1050,18 @@
       return;
     }
 
+    if (state.tool === 'marker') {
+      const existing = findMarkerAt(cell.c, cell.r);
+      if (existing) {
+        state.hoverKey = null;
+        state.drag = { type: 'marker', id: existing.id, moved: false };
+        stage.setPointerCapture(event.pointerId);
+      } else {
+        openNewMarkerDialog(cell);
+      }
+      return;
+    }
+
     state.drag = { type: 'room', start: cell, current: cell, moved: false };
     clearPreview();
     stage.setPointerCapture(event.pointerId);
@@ -923,6 +1097,22 @@
       if (cell.c === drag.toCell.c && cell.r === drag.toCell.r) return;
       drag.toCell = cell;
       planAndRenderPath(drag.fromCell, cell);
+      return;
+    }
+
+    if (drag.type === 'marker') {
+      const marker = findMarkerById(drag.id);
+      if (!marker) return;
+      if (marker.c === cell.c && marker.r === cell.r) return;
+      const occupant = findMarkerAt(cell.c, cell.r);
+      if (occupant && occupant.id !== marker.id) return;
+      if (!drag.moved) {
+        pushHistory();
+        drag.moved = true;
+      }
+      marker.c = cell.c;
+      marker.r = cell.r;
+      renderMarkers();
     }
   }
 
@@ -955,6 +1145,16 @@
       const cell = cellFromPoint(point);
       if (!insideGrid(cell)) return;
       addConnection(drag.fromCell, cell);
+      return;
+    }
+
+    if (drag.type === 'marker') {
+      if (drag.moved) {
+        renderAll();
+        return;
+      }
+      const marker = findMarkerById(drag.id);
+      if (marker) openEditMarkerDialog(marker);
       return;
     }
 
@@ -1016,10 +1216,97 @@
   }
 
   function onClearClick() {
-    if (state.rooms.length === 0 && state.connections.length === 0) return;
-    if (window.confirm('Apagar todas as salas, portas e conexões do mapa?')) {
+    if (state.rooms.length === 0 && state.connections.length === 0 && state.markers.length === 0) return;
+    if (window.confirm('Apagar todas as salas, portas, conexões e marcadores do mapa?')) {
       clearMap();
     }
+  }
+  // #endregion
+
+  // #region Diálogo do marcador
+  let editingMarker = null; // marcador sendo editado (null ao criar um novo)
+  let newMarkerCell = null; // célula escolhida ao criar um marcador novo
+
+  function buildMarkerSwatches() {
+    const colors = window.ColorPicker.PRESET_COLORS;
+    let html = '';
+    for (let i = 0; i < colors.length; i++) {
+      html += '<button type="button" class="swatch" data-color="' + colors[i].value +
+        '" style="--swatch:' + colors[i].value + '" title="' + colors[i].name +
+        '" aria-label="' + colors[i].name + '"></button>';
+    }
+    markerSwatches.innerHTML = html;
+
+    markerSwatches.addEventListener('click', function (event) {
+      const button = event.target.closest('.swatch');
+      if (!button) return;
+      markerColorInput.value = button.dataset.color;
+      updateMarkerSwatches();
+    });
+  }
+
+  function updateMarkerSwatches() {
+    const current = String(markerColorInput.value).toLowerCase();
+    const buttons = markerSwatches.querySelectorAll('.swatch');
+    for (let i = 0; i < buttons.length; i++) {
+      buttons[i].classList.toggle('swatch--active', buttons[i].dataset.color === current);
+    }
+  }
+
+  function openNewMarkerDialog(cell) {
+    editingMarker = null;
+    newMarkerCell = cell;
+    markerDialogTitle.textContent = 'Novo marcador';
+    markerLabelInput.value = '';
+    markerColorInput.value = markerColorInput.value || '#e8873c';
+    markerDeleteBtn.hidden = true;
+    updateMarkerSwatches();
+    markerDialog.showModal();
+    markerLabelInput.focus();
+  }
+
+  function openEditMarkerDialog(marker) {
+    editingMarker = marker;
+    newMarkerCell = null;
+    markerDialogTitle.textContent = 'Editar marcador';
+    markerLabelInput.value = marker.label || '';
+    markerColorInput.value = marker.color;
+    markerDeleteBtn.hidden = false;
+    updateMarkerSwatches();
+    markerDialog.showModal();
+    markerLabelInput.focus();
+  }
+
+  function closeMarkerDialog() {
+    markerDialog.close();
+  }
+
+  function onMarkerFormSubmit(event) {
+    event.preventDefault();
+    const label = markerLabelInput.value.trim();
+    const color = markerColorInput.value;
+
+    if (editingMarker) {
+      if (editingMarker.label !== label || editingMarker.color !== color) {
+        pushHistory();
+        editingMarker.label = label;
+        editingMarker.color = color;
+      }
+    } else if (newMarkerCell) {
+      pushHistory();
+      placeMarker(newMarkerCell.c, newMarkerCell.r, color, label);
+    }
+
+    closeMarkerDialog();
+    renderAll();
+  }
+
+  function onMarkerDeleteClick() {
+    if (!editingMarker) return;
+    pushHistory();
+    removeMarker(editingMarker.id);
+    closeMarkerDialog();
+    renderAll();
   }
   // #endregion
 
@@ -1054,6 +1341,19 @@
         setTool(this.dataset.tool);
       });
     }
+
+    window.ColorPicker.create(markerColorInput);
+    buildMarkerSwatches();
+    updateMarkerSwatches();
+    markerColorInput.addEventListener('input', updateMarkerSwatches);
+    markerForm.addEventListener('submit', onMarkerFormSubmit);
+    markerDialog.addEventListener('close', function () {
+      editingMarker = null;
+      newMarkerCell = null;
+    });
+    markerCancelBtn.addEventListener('click', closeMarkerDialog);
+    markerCloseBtn.addEventListener('click', closeMarkerDialog);
+    markerDeleteBtn.addEventListener('click', onMarkerDeleteClick);
 
     setTool('room');
     renderAll();

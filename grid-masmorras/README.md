@@ -71,21 +71,19 @@ As métricas principais são `--cell: 28px` (tamanho da célula), `--wall-thickn
 
 ## 5. Estrutura da interface
 
-A interface é composta por quatro áreas principais, empilhadas verticalmente, além de um painel flutuante do gerador.
+A interface é composta por três áreas principais, empilhadas verticalmente: a barra de ferramentas (topo), a área de edição (workspace) e a barra de controles (inferior), com o gerador e o zoom alinhados na mesma linha.
 
 ### 5.1. Barra de ferramentas (topo)
 
 Fixa no topo, contém:
 
-- Título: **Montador de Masmorras**.
-- Três ferramentas de edição (botões mutuamente exclusivos, com estado ativo destacado):
+- Os botões **Hub**, **Exportar** e **Importar**, na mesma ordem e estilo das demais ferramentas do hub.
+- Quatro ferramentas de edição (botões mutuamente exclusivos, com estado ativo destacado):
   - **Criar sala** (`data-tool="room"`).
   - **Adicionar porta** (`data-tool="door"`).
   - **Conectar** (`data-tool="connect"`).
-- Três ações:
-  - **Importar** — abre o seletor de arquivo para carregar um `.json`.
-  - **Exportar** — baixa o mapa atual como `masmorra.json`.
-  - **Limpar mapa** — apaga tudo, mediante confirmação.
+  - **Marcador** (`data-tool="marker"`).
+- A ação **Limpar mapa** — apaga tudo, mediante confirmação.
 
 ### 5.2. Área de edição (workspace)
 
@@ -93,29 +91,23 @@ Fixa no topo, contém:
 
 - O grid é formado por células quadradas uniformes (28px).
 - A área de edição ocupa toda a tela disponível (ver seção 6.8).
-- O grid é desenhado no fundo do `#stage`; sobre ele há cinco camadas sobrepostas (`position: absolute`, `pointer-events: none`) que recebem o conteúdo:
+- O grid é desenhado no fundo do `#stage`; sobre ele há seis camadas sobrepostas (`position: absolute`, `pointer-events: none`) que recebem o conteúdo:
   - `#layer-rooms` — preenchimento das salas.
   - `#layer-corridors` — células de corredor (trechos de conexão fora das salas).
   - `#layer-walls` — segmentos de parede.
   - `#layer-doors` — segmentos de porta.
+  - `#layer-markers` — marcadores coloridos.
   - `#layer-preview` — pré-visualizações de sala e de trajeto.
 - A interação é feita por **Pointer Events** diretamente sobre o `#stage`, com captura de ponteiro durante o arraste.
 
-### 5.3. Barra de status (rodapé)
+### 5.3. Barra de controles (inferior)
 
-Apresenta uma instrução curta e contextual sobre a ferramenta ativa (elemento `#hint`). A mensagem é atualizada a cada troca de ferramenta e inclui os atalhos relevantes. Por exemplo:
+Barra sobreposta na base da área de trabalho, alinhando na mesma linha:
 
-- Criar sala: “Arraste sobre o grid para criar uma sala. Clique em uma parede para alternar entre parede e porta. Esc cancela. Ctrl+Z desfaz.”
-- Adicionar porta: “Clique em um segmento de parede para alternar entre parede e porta. Ctrl+Z desfaz.”
-- Conectar: “Arraste de dentro de uma sala até outra sala para abrir uma passagem entre elas, sem porta. Esc cancela. Ctrl+Z desfaz.”
+- O **gerador**: rótulo **Salas**, campo numérico `#room-count` (mínimo 1, máximo 200, valor inicial 6) e o botão **GERAR MASMORRA**.
+- O **controle de zoom**: reduzir, indicador de nível (que também restaura para 100%) e aumentar.
 
-### 5.4. Painel do gerador (canto inferior direito)
-
-Painel flutuante, fixo no canto inferior direito da tela, com:
-
-- Rótulo **Salas**.
-- Campo numérico `#room-count` (mínimo 1, máximo 60, valor inicial 6).
-- Botão **GERAR MASMORRA**.
+O zoom usa os mesmos limites e passo da ferramenta de nós (`MIN_ZOOM = 0.4`, `MAX_ZOOM = 2.5`, `ZOOM_STEP = 1.25`), ancorado na posição do cursor. O deslocamento (pan) do mapa é feito com o **botão do meio** do mouse.
 
 ## 6. Funcionalidades principais
 
@@ -165,7 +157,7 @@ Comportamento atual:
 2. Durante o arraste, a aplicação mostra uma **prévia do trajeto** (validada em cor de destaque ou inválida em vermelho).
 3. Ao soltar sobre uma célula **pertencente a outra sala**, a conexão é criada.
 4. O trajeto é desenhado como células de corredor (`--corridor`) nos trechos que ficam **fora** das salas.
-5. Os **segmentos de parede atravessados pelo trajeto são abertos** — registrados em um conjunto de **aberturas** (`openings`) — e deixam de ser desenhados como parede, permitindo a passagem livre entre as áreas.
+5. Os **segmentos de parede atravessados pelo trajeto são abertos** — registrados em um conjunto de **aberturas** (`openings`) — e deixam de ser desenhados como parede, permitindo a passagem livre entre as áreas. Se um trecho atravessado tiver uma **porta**, ela é **removida** (a passagem aberta tem prioridade), evitando portas remanescentes sobre a abertura.
 
 Regras do trajeto:
 
@@ -190,27 +182,36 @@ Durante a criação de salas e de conexões, a aplicação mostra uma prévia an
 O editor mantém um **histórico de estados** em formato de snapshots JSON, com limite de **60 estados** (`HISTORY_LIMIT`). Ao exceder o limite, os estados mais antigos são descartados.
 
 - Atalho: **Ctrl+Z** (ou **Cmd+Z** no macOS).
-- Desfaz, uma etapa por vez, todas as operações que alteram o mapa: criar sala, alternar porta, criar conexão, limpar mapa, gerar masmorra, importar arquivo.
-- O estado atual inclui salas, portas, aberturas e conexões; ao desfazer, paredes, portas e aberturas são recalculadas e redesenhadas.
+- Desfaz, uma etapa por vez, todas as operações que alteram o mapa: criar sala, alternar porta, criar conexão, criar/editar/remover/arrastar marcador, limpar mapa, gerar masmorra, importar arquivo.
+- O estado atual inclui salas, portas, aberturas, conexões e marcadores; ao desfazer, paredes, portas e aberturas são recalculadas e redesenhadas.
 - O atalho é ignorado quando o foco está no campo numérico do gerador, para não interferir na edição do valor.
 
 ### 6.6. Geração aleatória de masmorra
 
-O painel do gerador (canto inferior direito) cria uma masmorra completa, aleatória em formato e tamanho de salas, com a quantidade de salas definida no campo numérico.
+O gerador (na barra de controles) cria uma masmorra completa com a quantidade de salas definida no campo numérico, seguindo um macro de RPG de mesa: uma **marcha** que começa em uma entrada à esquerda e se expande sala a sala.
 
 Ao clicar em **GERAR MASMORRA**:
 
-1. O valor do campo é lido e normalizado: menores que 1 viram 1, e maiores que 60 viram 60 (`MAX_ROOMS`). O campo é reescrito com o valor ajustado.
+1. O valor do campo é lido e normalizado: menores que 1 viram 1, e maiores que 200 viram 200 (`MAX_ROOMS`). O campo é reescrito com o valor ajustado.
 2. O mapa atual é substituído por um novo (a operação entra no histórico e pode ser desfeita com Ctrl+Z).
 
 Como a masmorra é construída:
 
-- **Crescimento por aglomerado:** a primeira sala é posicionada aleatoriamente e, a partir dela, cada sala nova **encosta em uma sala já existente**, compartilhando uma parede (ao norte, sul, leste ou oeste). Isso produz um conjunto contínuo, em vez de salas isoladas ligadas por corredores longos.
-- **Salas finas (corredores):** cada sala tem cerca de **25%** de chance de nascer com 1 célula de largura (ou de altura), assumindo formato de corredor. Corredores são tratados como salas normais.
-- **Limites de tamanho:** largura entre 2 e 8 células e altura entre 2 e 6 células, sempre respeitando o espaço do grid.
-- **Encaixe com tentativas:** para cada sala nova, o gerador faz até 40 tentativas (`PLACE_ATTEMPTS`) escolhendo uma sala-base e um lado; se até o fim não conseguir um encaixe que não sobreponha outra sala e caiba no grid, a geração para antes do total pedido.
-- **Uma passagem por junção:** para cada aresta compartilhada é aberta exatamente uma passagem. Aproximadamente **50%** das passagens viram **porta** (`DOOR_CHANCE`) e o restante vira **abertura** (sem porta).
-- **Sem cortes na borda:** a geração usa apenas colunas e linhas inteiras do grid, portanto nenhuma sala fica cortada na borda direita/inferior.
+- **Marcha a partir da entrada:** a primeira sala (a entrada) nasce à esquerda, no meio; a direção inicial é **leste**. Cada sala seguinte é encaixada **encostada** em uma sala já existente (compartilhando a parede), na direção definida pelas rolagens.
+- **Layout das saídas (1d4), relativo à direção de entrada:**
+  - 1 → segue em frente (corredor simples);
+  - 2 → bifurcação à frente (duas salas distintas);
+  - 3 → duas portas novas, à esquerda e à direita;
+  - 4 → três caminhos: esquerda, direita e frente.
+- **Tamanho/forma da sala (1d4), com o lado maior ao longo da marcha:** 1×1, 2×1, 3×1, e — na última faixa — 2×2 ou um corredor longo (4×1).
+- **Fila de expansão:** as salas novas entram em uma fila (`frontier`) e são processadas em largura; a marcha continua até atingir o número de salas pedido ou esgotar os encaixes possíveis.
+- **Margens de encaixe proporcionais:** o espaço de encaixe cresce com o número de salas solicitado (`span` proporcional à raiz do total), evitando que a marcha pare cedo demais.
+
+**Regras das passagens** (aplicadas à aresta compartilhada entre duas salas encostadas):
+
+1. A passagem é randomizada entre **porta** (~50%, `DOOR_CHANCE`) e **abertura** (sem porta).
+2. Uma passagem **não pode ficar ao lado de outra porta**: se ficar, permanece como **parede** (evita portas adjacentes).
+3. Uma passagem **ao lado de uma abertura** vira **abertura**, alargando a passagem (2 células).
 
 ### 6.7. Exportar e importar
 
@@ -221,7 +222,8 @@ Como a masmorra é construída:
   "version": 1,
   "rooms": [{ "id": 1, "x": 2, "y": 3, "w": 4, "h": 5 }],
   "doors": ["h:2:3", "v:6:4"],
-  "connections": [{ "id": 7, "from": 1, "to": 2, "cells": [{ "c": 2, "r": 3 }] }]
+  "connections": [{ "id": 7, "from": 1, "to": 2, "cells": [{ "c": 2, "r": 3 }] }],
+  "markers": [{ "id": 8, "c": 2, "r": 3, "color": "#ef4444", "label": "Tesouro" }]
 }
 ```
 
@@ -234,7 +236,8 @@ O download é feito no navegador (Blob + `URL.createObjectURL`), sem backend.
 3. Cada conexão precisa ter um array `cells` não vazio, com `c` e `r` inteiros.
 4. Salas e conexões são recarregadas; em seguida, as **aberturas são recalculadas a partir das conexões** (o arquivo não guarda aberturas), garantindo a consistência visual de passagens sem porta.
 5. As portas listadas em `doors` são restauradas apenas se ainda corresponderem a um segmento de parede existente.
-6. A operação entra no histórico e pode ser desfeita com Ctrl+Z.
+6. Os marcadores em `markers` são restaurados quando possuem `c` e `r` inteiros; cor e texto ausentes assumem os padrões.
+7. A operação entra no histórico e pode ser desfeita com Ctrl+Z.
 
 Se o arquivo for inválido ou estiver corrompido, a aplicação exibe um alerta e mantém o mapa atual intacto.
 
@@ -249,7 +252,19 @@ O grid se adapta à tela e ao conteúdo do mapa:
 
 ### 6.9. Limpar mapa
 
-O botão **Limpar mapa** remove todas as salas, portas, aberturas e conexões. A ação pede confirmação antes de apagar e **é registrada no histórico**, portanto pode ser desfeita com Ctrl+Z. Se o mapa já estiver vazio, nada acontece.
+O botão **Limpar mapa** remove todas as salas, portas, aberturas, conexões e marcadores. A ação pede confirmação antes de apagar e **é registrada no histórico**, portanto pode ser desfeita com Ctrl+Z. Se o mapa já estiver vazio, nada acontece.
+
+### 6.10. Marcadores
+
+Com a ferramenta **Marcador** ativa, o usuário pode anotar pontos de interesse no mapa (tesouro, entrada, chefe, etc.) como uma **bolinha colorida**.
+
+- **Criar:** clique em uma célula **vazia** (sem marcador) para abrir o diálogo **Novo marcador**, informar um **texto opcional** e escolher a **cor**. Ao salvar, o marcador é encaixado no **centro da célula**.
+- **Cor:** o seletor reaproveita o componente de cor da ferramenta de nós (`window.ColorPicker`), com dez cores predefinidas (swatches) e ajuste livre por HSV/hexadecimal.
+- **Texto opcional:** quando informado, aparece em um pequeno rótulo acima da bolinha; sem texto, só a bolinha é desenhada.
+- **Arrastar:** pressione sobre um marcador existente e arraste para movê-lo entre as salas; a posição **encaixa na grade** (snap por célula). O movimento é registrado no histórico.
+- **Editar/remover:** um clique simples (sem arrastar) sobre um marcador abre **Editar marcador**, onde é possível alterar texto e cor ou **Remover** o marcador.
+
+Cada célula comporta um marcador.
 
 ## 7. Modelo lógico dos elementos
 
@@ -273,9 +288,15 @@ O estado do editor é mantido em um único objeto (`state`) e o histórico em um
 { id, from, to, cells: [{ c, r }] }   // salas de origem/destino e células do trajeto
 ```
 
+### Marcador
+
+```js
+{ id, c, r, color, label }   // célula (encaixe na grade), cor hexadecimal e texto opcional
+```
+
 ### Histórico
 
-`history` guarda snapshots JSON com `{ rooms, doors, openings, connections }`, limitado a 60 entradas.
+`history` guarda snapshots JSON com `{ rooms, doors, openings, connections, markers }`, limitado a 60 entradas.
 
 A representação interna pode ser ajustada, desde que permita identificar os elementos e redesenhar o mapa sem inconsistências.
 
@@ -292,7 +313,8 @@ A masmorra é uma das ferramentas do hub, mantida em sua própria pasta. Estrutu
     ├── css/
     │   └── style.css
     ├── js/
-    │   └── app.js
+    │   ├── app.js
+    │   └── picker.js
     └── README.md
 ```
 
@@ -300,7 +322,8 @@ A masmorra é uma das ferramentas do hub, mantida em sua própria pasta. Estrutu
 - `theme.css` (raiz): tokens de cor genéricos, compartilhados por todas as ferramentas.
 - `grid-masmorras/index.html`: estrutura da página e carregamento dos arquivos.
 - `grid-masmorras/css/style.css`: aparência da interface, grid e estados visuais (usa os tokens de `../theme.css`).
-- `grid-masmorras/js/app.js`: lógica de desenho, criação de salas, portas, conexões, gerador, histórico (desfazer) e importação/exportação. Organizado por regiões (`#region`).
+- `grid-masmorras/js/app.js`: lógica de desenho, criação de salas, portas, conexões, marcadores, gerador, histórico (desfazer) e importação/exportação. Organizado por regiões (`#region`).
+- `grid-masmorras/js/picker.js`: seletor de cor reaproveitado da ferramenta de nós, exposto como `window.ColorPicker` para uso em script clássico.
 - `grid-masmorras/README.md`: instruções para executar e publicar o projeto.
 
 Não é necessário utilizar ferramentas de compilação ou dependências externas.
@@ -318,6 +341,7 @@ Não é necessário utilizar ferramentas de compilação ou dependências extern
 - [x] A conexão abre uma passagem sem porta, unindo as salas em uma área contínua.
 - [x] A aplicação apresenta uma prévia das salas e conexões durante o arraste.
 - [x] É possível gerar uma masmorra aleatória com a quantidade de salas informada.
+- [x] É possível criar marcadores coloridos com texto opcional, arrastá-los entre as salas e editá-los/removê-los.
 - [x] É possível desfazer as ações com Ctrl+Z.
 - [x] É possível exportar e importar a masmorra em formato JSON.
 - [x] O mapa utiliza apenas elementos visuais simples e cores sólidas, sem depender de imagens ou texturas.
@@ -329,14 +353,14 @@ Os itens abaixo não fazem parte da versão atual:
 
 - Texturas, imagens, iluminação ou efeitos tridimensionais.
 - Sistema de regras ou integração com algum sistema específico de RPG.
-- Cadastro de monstros, armadilhas, tesouros ou outros elementos de jogo.
+- Cadastro de monstros, armadilhas ou tesouros com atributos de jogo (os marcadores são apenas anotações visuais coloridas, sem regras).
 - Colaboração em tempo real entre usuários.
 - Backend, autenticação ou banco de dados.
 - Exportação para formatos de imagem ou impressão.
 
 ## 11. Resultado
 
-O projeto oferece um editor de masmorras leve, acessível pelo navegador e fácil de publicar no GitHub Pages. O usuário monta a estrutura de uma masmorra desenhando salas no grid, adicionando portas às paredes, conectando salas por passagens abertas e, opcionalmente, gerando uma masmorra aleatória. O mapa pode ser salvo e reaberto via JSON, e qualquer ação pode ser desfeita com Ctrl+Z, tudo com uma interface simples baseada em cores sólidas e tema escuro.
+O projeto oferece um editor de masmorras leve, acessível pelo navegador e fácil de publicar no GitHub Pages. O usuário monta a estrutura de uma masmorra desenhando salas no grid, adicionando portas às paredes, conectando salas por passagens abertas, anotando pontos de interesse com marcadores coloridos e, opcionalmente, gerando uma masmorra aleatória. O mapa pode ser salvo e reaberto via JSON, e qualquer ação pode ser desfeita com Ctrl+Z, tudo com uma interface simples baseada em cores sólidas e tema escuro.
 
 ## 12. Como executar e publicar
 
@@ -353,7 +377,8 @@ A ferramenta fica em sua própria pasta dentro do repositório, pronta para publ
     ├── css/
     │   └── style.css
     ├── js/
-    │   └── app.js
+    │   ├── app.js
+    │   └── picker.js
     └── README.md
 ```
 
@@ -386,9 +411,11 @@ https://<usuario>.github.io/<repositorio>/
 - **Criar sala:** arraste sobre o grid para definir a área da sala. Um clique simples cria uma sala de 1 célula.
 - **Adicionar porta:** clique em um segmento de parede para alternar entre parede e porta.
 - **Conectar:** arraste de dentro de uma sala até outra sala para abrir uma passagem entre elas (sem porta).
+- **Marcador:** clique em uma célula vazia para criar uma bolinha colorida (com texto opcional), arraste um marcador existente para movê-lo e clique nele para editar ou remover.
 - **Importar / Exportar:** carregue um `masmorra.json` ou baixe o mapa atual em JSON.
 - **Limpar mapa:** remove todos os elementos criados, mediante confirmação.
-- **GERAR MASMORRA:** informe a quantidade de salas no campo numérico e clique no botão no canto inferior direito.
+- **GERAR MASMORRA:** informe a quantidade de salas no campo numérico e clique no botão na barra inferior.
+- **Zoom / pan:** use os botões de zoom ou a roda do mouse (ancorada no cursor); arraste o mapa com o botão do meio do mouse.
 
 ### 12.5. Atalhos de teclado
 

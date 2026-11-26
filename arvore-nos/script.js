@@ -47,8 +47,10 @@ const ZOOM_STEP = 1.25;
 
 /** Grade em anéis: distância entre anéis concêntricos */
 const RING_STEP = 180;
-/** Grade em anéis: posições de encaixe no primeiro anel (5, 10, 15… nos seguintes) */
+/** Grade em anéis: posições de encaixe no primeiro anel (dobra até RING_MAX_DIVISIONS) */
 const RING_BASE_DIVISIONS = 5;
+/** Grade em anéis: limite de posições de encaixe por anel */
+const RING_MAX_DIVISIONS = 20;
 /** Grade em anéis: quantidade de anéis desenhados a partir do centro */
 const RING_COUNT = 30;
 
@@ -638,10 +640,11 @@ function findFreePosition(radius) {
 
 /**
  * Quantidade de posições de encaixe no anel informado.
- * Cresce 5 a cada anel: 5 no primeiro, 10 no segundo, 15 no terceiro…
+ * Dobra até o limite: 5 no primeiro anel, 10 no segundo, 20 do terceiro em diante.
  */
 function ringDivisions(ringIndex) {
-  return RING_BASE_DIVISIONS * Math.max(1, ringIndex);
+  const index = Math.max(1, ringIndex);
+  return Math.min(RING_BASE_DIVISIONS * Math.pow(2, index - 1), RING_MAX_DIVISIONS);
 }
 
 /**
