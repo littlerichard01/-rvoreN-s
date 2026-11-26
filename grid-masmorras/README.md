@@ -188,7 +188,7 @@ O editor mantém um **histórico de estados** em formato de snapshots JSON, com 
 
 ### 6.6. Geração aleatória de masmorra
 
-O gerador (na barra de controles) cria uma masmorra completa com a quantidade de salas definida no campo numérico, seguindo um macro de RPG de mesa: uma **marcha** que começa em uma entrada à esquerda e se expande sala a sala.
+O gerador (na barra de controles) cria uma masmorra completa com a quantidade de salas definida no campo numérico: um **aglomerado compacto** de salas pequenas, todas encostadas umas nas outras e unidas por passagens.
 
 Ao clicar em **GERAR MASMORRA**:
 
@@ -197,21 +197,16 @@ Ao clicar em **GERAR MASMORRA**:
 
 Como a masmorra é construída:
 
-- **Marcha a partir da entrada:** a primeira sala (a entrada) nasce à esquerda, no meio; a direção inicial é **leste**. Cada sala seguinte é encaixada **encostada** em uma sala já existente (compartilhando a parede), na direção definida pelas rolagens.
-- **Layout das saídas (1d4), relativo à direção de entrada:**
-  - 1 → segue em frente (corredor simples);
-  - 2 → bifurcação à frente (duas salas distintas);
-  - 3 → duas portas novas, à esquerda e à direita;
-  - 4 → três caminhos: esquerda, direita e frente.
-- **Tamanho/forma da sala (1d4), com o lado maior ao longo da marcha:** 1×1, 2×1, 3×1, e — na última faixa — 2×2 ou um corredor longo (4×1).
-- **Fila de expansão:** as salas novas entram em uma fila (`frontier`) e são processadas em largura; a marcha continua até atingir o número de salas pedido ou esgotar os encaixes possíveis.
-- **Margens de encaixe proporcionais:** o espaço de encaixe cresce com o número de salas solicitado (`span` proporcional à raiz do total), evitando que a marcha pare cedo demais.
+- **Aglomerado compacto:** a primeira sala nasce no centro da área. Cada sala seguinte é encaixada **encostada** em uma sala já existente (compartilhando a parede); entre várias tentativas, vence o encaixe que **encosta em mais salas** e que fica **mais próximo do centro** do aglomerado — o que preenche os vãos e mantém o conjunto unido e arredondado.
+- **Tamanho/forma da sala:** predominam as **tiras de 1 célula** de espessura — 1×1 (28%), tiras curtas 2×1/1×2 (38%), médias 3×1/1×3 (12%) e longas 4×1/1×4 (6%) — além de cômodos quadrados 2×2 (16%). A orientação (horizontal ou vertical) é sorteada a cada sala.
+- **Espaço de encaixe:** a área disponível cresce com o número de salas solicitado (`span` proporcional à raiz do total); a compactação vem da escolha do melhor encaixe, não do limite de espaço.
 
 **Regras das passagens** (aplicadas à aresta compartilhada entre duas salas encostadas):
 
-1. A passagem é randomizada entre **porta** (~50%, `DOOR_CHANCE`) e **abertura** (sem porta).
-2. Uma passagem **não pode ficar ao lado de outra porta**: se ficar, permanece como **parede** (evita portas adjacentes).
-3. Uma passagem **ao lado de uma abertura** vira **abertura**, alargando a passagem (2 células).
+1. Entre cada par de salas vizinhas, a parede vira passagem com probabilidade `OPEN_CHANCE` (~75%); as demais permanecem como parede. A escolha garante que **nenhuma sala fique isolada**, mantendo o conjunto ligado e criando **rotas alternativas (ciclos)**.
+2. Cada passagem é randomizada entre **porta** (~8%, `DOOR_CHANCE`) e **abertura** (sem porta).
+3. Uma passagem **não pode ficar ao lado de outra porta**: se ficar, permanece como **parede** (evita portas adjacentes).
+4. Uma passagem **ao lado de uma abertura** vira **abertura**, alargando a passagem (2 células).
 
 ### 6.7. Exportar e importar
 

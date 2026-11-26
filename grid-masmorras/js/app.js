@@ -517,23 +517,8 @@
   // #endregion
 
   // #region Geração aleatória
-  const DOOR_CHANCE = 0.5;     // proporção de passagens com porta (as demais ficam abertas)
-
-  // Direções em células: leste, sul, oeste e norte (a marcha inicial é para leste)
-  const DIRS = [
-    { dc: 1, dr: 0 },
-    { dc: 0, dr: 1 },
-    { dc: -1, dr: 0 },
-    { dc: 0, dr: -1 }
-  ];
-
-  function turnLeft(dir) {
-    return (dir + 3) % 4;
-  }
-
-  function turnRight(dir) {
-    return (dir + 1) % 4;
-  }
+  const DOOR_CHANCE = 0.08;    // proporção de passagens com porta (as demais ficam abertas)
+  const OPEN_CHANCE = 0.75;    // proporção das paredes vizinhas que viram passagem (gera ciclos)
 
   function randomInt(min, max) {
     return min + Math.floor(Math.random() * (max - min + 1));
@@ -557,82 +542,92 @@
     return false;
   }
 
-  // Layout da sala (1d4): quantidade e disposição das passagens novas, além da entrada
-  function rollExits(heading) {
-    const front = heading;
-    const left = turnLeft(heading);
-    const right = turnRight(heading);
-    const roll = randomInt(1, 4);
-    if (roll === 1) return [front];         // corredor simples: segue em frente
-    if (roll === 2) return [front, front];  // bifurcação à frente: duas salas distintas
-    if (roll === 3) return [left, right];   // duas portas novas: esquerda e direita
-    return [left, right, front];            // três caminhos: esquerda, direita e frente
+  // Tamanho/forma da sala: aglomerado compacto de salas pequenas; predominam tiras de 1 célula
+  function rollRoomSize() {
+    const roll = randomInt(1, 100);
+    const horizontal = Math.random() < 0.5;
+    if (roll <= 28) return { w: 1, h: 1 };                                // cômodo mínimo
+    if (roll <= 66) return horizontal ? { w: 2, h: 1 } : { w: 1, h: 2 };  // tira curta
+    if (roll <= 78) return horizontal ? { w: 3, h: 1 } : { w: 1, h: 3 };  // tira média
+    if (roll <= 84) return horizontal ? { w: 4, h: 1 } : { w: 1, h: 4 };  // tira longa
+    return { w: 2, h: 2 };                                                // cômodo quadrado
   }
 
-  // Tamanho/forma da sala (1d4): de cômodos pequenos a corredores, com o lado maior ao longo da marcha
-  function rollRoomSize(heading) {
-    const horizontal = heading === 0 || heading === 2;
-    const roll = randomInt(1, 4);
-    if (roll === 1) return { w: 1, h: 1 };                                // cômodo mínimo
-    if (roll === 2) return horizontal ? { w: 2, h: 1 } : { w: 1, h: 2 };  // cômodo curto
-    if (roll === 3) return horizontal ? { w: 3, h: 1 } : { w: 1, h: 3 };  // cômodo comprido
-    // cômodo quadrado pequeno ou corredor longo
-    return Math.random() < 0.5
-      ? { w: 2, h: 2 }
-      : (horizontal ? { w: 4, h: 1 } : { w: 1, h: 4 });
-  }
-
-  // Tenta encaixar uma sala nova encostada na sala "parent", na direção indicada.
-  // Devolve a sala criada ou null quando a disposição não cabe (recurso "impossível").
-  function placeAdjacent(parent, dir, size, maxC, maxR) {
-    const vector = DIRS[dir];
-    const candidates = [];
-
-    if (vector.dc !== 0) {
-      const x = vector.dc === 1 ? parent.x + parent.w : parent.x - size.w;
+  // Retângulo encostado em "parent" pelo lado "dir" (0 leste, 1 oeste, 2 sul, 3 norte)
+  function adjacentRect(parent, dir, size) {
+    if (dir === 0 || dir === 1) {
       const lo = parent.y - size.h + 1;
       const hi = parent.y + parent.h - 1;
-      for (let o = lo; o <= hi; o++) candidates.push({ x: x, y: o, w: size.w, h: size.h });
-    } else {
-      const y = vector.dr === 1 ? parent.y + parent.h : parent.y - size.h;
-      const lo = parent.x - size.w + 1;
-      const hi = parent.x + parent.w - 1;
-      for (let o = lo; o <= hi; o++) candidates.push({ x: o, y: y, w: size.w, h: size.h });
+      if (hi < lo) return null;
+      const x = dir === 0 ? parent.x + parent.w : parent.x - size.w;
+      return { x: x, y: randomInt(lo, hi), w: size.w, h: size.h };
     }
-
-    // prefere o encaixe mais próximo do centro da parede compartilhada
-    const center = vector.dc !== 0
-      ? parent.y + (parent.h - 1) / 2
-      : parent.x + (parent.w - 1) / 2;
-    candidates.sort(function (a, b) {
-      const oa = vector.dc !== 0 ? a.y : a.x;
-      const ob = vector.dc !== 0 ? b.y : b.x;
-      return Math.abs(oa - center) - Math.abs(ob - center);
-    });
-
-    for (let i = 0; i < candidates.length; i++) {
-      const rect = candidates[i];
-      if (!fitsInGrid(rect, maxC, maxR)) continue;
-      if (overlapsAny(rect)) continue;
-      return placeRoom(rect);
-    }
-    return null;
+    const lo = parent.x - size.w + 1;
+    const hi = parent.x + parent.w - 1;
+    if (hi < lo) return null;
+    const y = dir === 2 ? parent.y + parent.h : parent.y - size.h;
+    return { x: randomInt(lo, hi), y: y, w: size.w, h: size.h };
   }
 
-  // Chave da aresta compartilhada entre duas salas encostadas (uma passagem no meio)
-  function sharedEdgeKey(parent, child, dir) {
-    if (dir === 0 || dir === 2) {
-      const lo = Math.max(parent.y, child.y);
-      const hi = Math.min(parent.y + parent.h, child.y + child.h) - 1;
+  // Quantas salas já existentes encostam neste retângulo (quanto mais, mais compacto)
+  function contactCount(rect) {
+    let count = 0;
+    for (let i = 0; i < state.rooms.length; i++) {
+      const room = state.rooms[i];
+      const encostaH = (rect.x + rect.w === room.x || room.x + room.w === rect.x) &&
+        Math.min(rect.y + rect.h, room.y + room.h) > Math.max(rect.y, room.y);
+      const encostaV = (rect.y + rect.h === room.y || room.y + room.h === rect.y) &&
+        Math.min(rect.x + rect.w, room.x + room.w) > Math.max(rect.x, room.x);
+      if (encostaH || encostaV) count++;
+    }
+    return count;
+  }
+
+  // Melhor encaixe entre várias tentativas, priorizando o que encosta em mais salas
+  // e o que mantém o aglomerado compacto (perto do centro das salas já colocadas).
+  function bestPlacement(maxC, maxR) {
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < state.rooms.length; i++) {
+      cx += state.rooms[i].x + state.rooms[i].w / 2;
+      cy += state.rooms[i].y + state.rooms[i].h / 2;
+    }
+    cx /= state.rooms.length;
+    cy /= state.rooms.length;
+
+    let best = null;
+    let bestScore = -Infinity;
+    for (let i = 0; i < 90; i++) {
+      const parent = state.rooms[randomInt(0, state.rooms.length - 1)];
+      const rect = adjacentRect(parent, randomInt(0, 3), rollRoomSize());
+      if (!rect) continue;
+      if (!fitsInGrid(rect, maxC, maxR)) continue;
+      if (overlapsAny(rect)) continue;
+      const dx = rect.x + rect.w / 2 - cx;
+      const dy = rect.y + rect.h / 2 - cy;
+      const score = contactCount(rect) * 10 - Math.hypot(dx, dy) * 0.8 + Math.random() * 3;
+      if (score > bestScore) { bestScore = score; best = rect; }
+    }
+    return best;
+  }
+
+  // Chave do segmento de parede compartilhado entre duas salas encostadas (meio do trecho)
+  function sharedEdgeKey(a, b) {
+    if (a.x + a.w === b.x || b.x + b.w === a.x) {
+      const x = a.x + a.w === b.x ? b.x : a.x;
+      const lo = Math.max(a.y, b.y);
+      const hi = Math.min(a.y + a.h, b.y + b.h) - 1;
       if (hi < lo) return null;
-      const x = dir === 0 ? child.x : parent.x;
       return 'v:' + x + ':' + Math.floor((lo + hi) / 2);
     }
-    const lo = Math.max(parent.x, child.x);
-    const hi = Math.min(parent.x + parent.w, child.x + child.w) - 1;
-    if (hi < lo) return null;
-    const y = dir === 1 ? child.y : parent.y;
-    return 'h:' + Math.floor((lo + hi) / 2) + ':' + y;
+    if (a.y + a.h === b.y || b.y + b.h === a.y) {
+      const y = a.y + a.h === b.y ? b.y : a.y;
+      const lo = Math.max(a.x, b.x);
+      const hi = Math.min(a.x + a.w, b.x + b.w) - 1;
+      if (hi < lo) return null;
+      return 'h:' + Math.floor((lo + hi) / 2) + ':' + y;
+    }
+    return null;
   }
 
   // Os dois segmentos de parede vizinhos na mesma linha (os "lados" de um mesmo trecho)
@@ -644,7 +639,57 @@
     return ['h:' + (seg.c - 1) + ':' + seg.r, 'h:' + (seg.c + 1) + ':' + seg.r];
   }
 
-  // Marcha de masmorra: cresce sala a sala a partir da entrada, aplicando os dois d4
+  // Todas as arestas de parede compartilhadas entre salas vizinhas
+  function sharedEdges() {
+    const edges = [];   // { key, a, b } com a/b = índices das salas
+    const seen = new Set();
+    for (let i = 0; i < state.rooms.length; i++) {
+      for (let j = i + 1; j < state.rooms.length; j++) {
+        const key = sharedEdgeKey(state.rooms[i], state.rooms[j]);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        edges.push({ key: key, a: i, b: j });
+      }
+    }
+    return edges;
+  }
+
+  // Escolhe as passagens: abre parte das paredes vizinhas e garante que nenhuma
+  // sala fique isolada (o conjunto continua ligado e ganha rotas alternativas).
+  function choosePassages(edges) {
+    const deg = new Array(state.rooms.length).fill(0);
+    const open = new Array(edges.length).fill(false);
+    const order = [];
+    for (let i = 0; i < edges.length; i++) order.push(i);
+    order.sort(function () { return Math.random() - 0.5; });
+
+    for (let k = 0; k < order.length; k++) {
+      const i = order[k];
+      if (Math.random() < OPEN_CHANCE) {
+        open[i] = true;
+        deg[edges[i].a]++;
+        deg[edges[i].b]++;
+      }
+    }
+
+    // liga as salas que ficaram sem nenhuma passagem
+    for (let k = 0; k < order.length; k++) {
+      const i = order[k];
+      if (open[i]) continue;
+      if (deg[edges[i].a] === 0 || deg[edges[i].b] === 0) {
+        open[i] = true;
+        deg[edges[i].a]++;
+        deg[edges[i].b]++;
+      }
+    }
+
+    const keys = [];
+    for (let i = 0; i < edges.length; i++) if (open[i]) keys.push(edges[i].key);
+    return keys;
+  }
+
+  // Aglomerado compacto: cada sala nova encosta em alguma já existente, priorizando
+  // o encaixe que mais encosta em salas (preenche vãos e mantém o conjunto unido).
   function generateDungeon(total) {
     pushHistory();
 
@@ -656,43 +701,35 @@
     state.hoverKey = null;
     state.drag = null;
 
-    // As margens de encaixe crescem com o número de salas pedido, para que a
-    // marcha consiga distribuir todas elas em vez de esbarrar cedo no limite.
-    const span = Math.max(24, Math.ceil(Math.sqrt(total) * 7));
+    // O espaço de encaixe cresce com o número de salas; a compactação vem de
+    // escolher sempre o encaixe que mais encosta em salas já existentes.
+    const span = Math.max(6, Math.ceil(Math.sqrt(total * 2.6)) + 2);
     const boundCols = Math.max(cols, span);
     const boundRows = Math.max(rows, span);
 
-    const startCol = 2;
-    const startRow = Math.max(2, Math.min(Math.floor(boundRows / 2), boundRows - 3));
+    // A primeira sala nasce no centro da área disponível
+    const first = rollRoomSize();
+    placeRoom({
+      x: Math.max(0, Math.floor(boundCols / 2) - Math.floor(first.w / 2)),
+      y: Math.max(0, Math.floor(boundRows / 2) - Math.floor(first.h / 2)),
+      w: first.w,
+      h: first.h
+    });
 
-    // A entrada começa à esquerda, no meio; a marcha inicial é para leste
-    const entrance = placeRoom({ x: startCol, y: startRow, w: 2, h: 2 });
-    const frontier = [{ room: entrance, heading: 0 }];
-    const passages = [];
-    let placed = 1;
-
-    while (frontier.length > 0 && placed < total) {
-      const current = frontier.shift();
-      const exits = rollExits(current.heading);
-
-      for (let i = 0; i < exits.length && placed < total; i++) {
-        const size = rollRoomSize(exits[i]);
-        const child = placeAdjacent(current.room, exits[i], size, boundCols, boundRows);
-        if (!child) continue; // disposição impossível: o ramo é abandonado
-
-        const key = sharedEdgeKey(current.room, child, exits[i]);
-        if (key) passages.push(key);
-        placed++;
-        frontier.push({ room: child, heading: exits[i] });
-      }
+    // As demais salas crescem encostadas, formando um único aglomerado
+    for (let placed = 1; placed < total; placed++) {
+      const rect = bestPlacement(boundCols, boundRows);
+      if (!rect) break;
+      placeRoom(rect);
     }
 
     rebuildWalls();
 
-    // Abre as passagens encostadas aplicando as regras de portas:
-    //   1) randomiza entre porta e conexão aberta;
+    // Abre as passagens escolhidas aplicando as regras de portas:
+    //   1) randomiza entre porta e passagem aberta;
     //   2) porta não pode ficar ao lado de outra porta — vira parede;
-    //   3) porta ao lado de uma conexão vira conexão, alargando a passagem.
+    //   3) porta ao lado de uma passagem vira passagem, alargando o vão.
+    const passages = choosePassages(sharedEdges());
     for (let i = 0; i < passages.length; i++) {
       const key = passages[i];
       if (!state.wallMap.has(key)) continue;
