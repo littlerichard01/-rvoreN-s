@@ -11,6 +11,9 @@
   const MIN_CELLS = 4;       // mínimo de colunas e linhas em telas muito pequenas
   const MAX_ROOMS = 200;     // limite de salas na geração aleatória
 
+  // Chave de armazenamento local da masmorra em edição
+  const STORAGE_KEY = 'masmorras:dungeon:v1';
+
   // Limites e passo do zoom (mesmos valores da ferramenta de nós)
   const MIN_ZOOM = 0.4;
   const MAX_ZOOM = 2.5;
@@ -715,15 +718,19 @@
   // #endregion
 
   // #region Exportar e importar
-  function exportDungeon() {
-    const data = {
+  // Estado da masmorra no formato usado no arquivo exportado e no armazenamento local
+  function serializeDungeon() {
+    return {
       version: 1,
       rooms: state.rooms,
       doors: Array.from(state.doors),
       connections: state.connections,
       markers: state.markers
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  }
+
+  function exportDungeon() {
+    const blob = new Blob([JSON.stringify(serializeDungeon(), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -732,6 +739,40 @@
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  // Guarda a masmorra atual no armazenamento local (restaurada ao recarregar a página)
+  function save() {
+    try {
+      const data = serializeDungeon();
+      if (data.rooms.length === 0) {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (error) {
+      console.warn('Não foi possível salvar a masmorra localmente.', error);
+    }
+  }
+
+  // Restaura a masmorra salva localmente, se houver
+  function loadFromStorage() {
+    let raw = null;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+    } catch (error) {
+      console.warn('Não foi possível acessar o armazenamento local.', error);
+      return false;
+    }
+    if (!raw) return false;
+
+    try {
+      loadDungeon(JSON.parse(raw), true);
+    } catch (error) {
+      console.warn('Masmorra salva inválida, ignorando.', error);
+      return false;
+    }
+    return true;
   }
 
   function isInteger(value) {
@@ -756,7 +797,7 @@
     return cells;
   }
 
-  function loadDungeon(data) {
+  function loadDungeon(data, skipHistory) {
     if (!data || !Array.isArray(data.rooms) || !Array.isArray(data.connections)) {
       throw new Error('formato não reconhecido');
     }
@@ -797,7 +838,7 @@
       }
     }
 
-    pushHistory();
+    if (!skipHistory) pushHistory();
 
     state.rooms = [];
     state.doors.clear();
@@ -974,6 +1015,7 @@
     renderWalls();
     renderDoors();
     renderMarkers();
+    save();
   }
   // #endregion
 
@@ -1312,6 +1354,7 @@
 
   // #region Inicialização
   function init() {
+    loadFromStorage();
     applyGridSize();
     applyView();
     updateZoomControls();
