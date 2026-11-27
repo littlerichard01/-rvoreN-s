@@ -32,9 +32,11 @@
   const layerCorridors = document.getElementById('layer-corridors');
   const layerWalls = document.getElementById('layer-walls');
   const layerDoors = document.getElementById('layer-doors');
+  const layerPath = document.getElementById('layer-path');
   const layerMarkers = document.getElementById('layer-markers');
   const layerPreview = document.getElementById('layer-preview');
   const clearButton = document.getElementById('btn-clear');
+  const clearPathButton = document.getElementById('btn-clear-path');
   const exportButton = document.getElementById('btn-export');
   const importButton = document.getElementById('btn-import');
   const fileInput = document.getElementById('file-input');
@@ -63,6 +65,7 @@
     openings: new Set(),     // chaves de segmentos abertos por corredores (sem porta)
     connections: [],         // { id, from, to, cells: [{ c, r }] }
     markers: [],             // { id, c, r, color, label }
+    path: new Set(),         // chaves "c:r" das células com o caminho traçado
     wallSegments: new Set(), // chaves de todos os segmentos de parede atuais
     wallMap: new Map(),      // chave do segmento -> id da sala
     hoverKey: null,
@@ -135,6 +138,26 @@
       if (b.r === a.r - 1) return 'h:' + a.c + ':' + a.r;
     }
     return null;
+  }
+
+  // Células percorridas por uma linha contínua entre dois pontos (Bresenham)
+  function lineCells(a, b) {
+    const cells = [];
+    let c = a.c;
+    let r = a.r;
+    const dc = Math.abs(b.c - a.c);
+    const dr = Math.abs(b.r - a.r);
+    const sc = a.c < b.c ? 1 : -1;
+    const sr = a.r < b.r ? 1 : -1;
+    let err = dc - dr;
+    while (true) {
+      cells.push({ c: c, r: r });
+      if (c === b.c && r === b.r) break;
+      const e2 = 2 * err;
+      if (e2 > -dr) { err -= dr; c += sc; }
+      if (e2 < dc) { err += dc; r += sr; }
+    }
+    return cells;
   }
   // #endregion
 
@@ -379,7 +402,8 @@
       doors: Array.from(state.doors),
       openings: Array.from(state.openings),
       connections: state.connections,
-      markers: state.markers
+      markers: state.markers,
+      path: Array.from(state.path)
     });
   }
 
@@ -395,6 +419,7 @@
     state.openings = new Set(data.openings || []);
     state.connections = data.connections;
     state.markers = data.markers || [];
+    state.path = new Set(data.path || []);
     state.nextId = nextIdFromState();
     state.hoverKey = null;
     state.drag = null;
@@ -478,8 +503,39 @@
     state.openings.clear();
     state.connections = [];
     state.markers = [];
+    state.path.clear();
     state.hoverKey = null;
     state.drag = null;
+    renderAll();
+  }
+
+  // Marca as células do caminho traçado; o histórico é registrado só no início do traço.
+  // Cada célula é removida e reinserida para ficar no fim da ordem do Set: assim uma
+  // célula repintada (ex.: um traço que cruza outro) assume a cor mais recente, e não a
+  // primeira, já que renderPath() distribui a rampa na ordem de iteração do Set.
+  function paintPath(cells, drag) {
+    let anyNew = false;
+    for (let i = 0; i < cells.length; i++) {
+      if (!state.path.has(cells[i].c + ':' + cells[i].r)) { anyNew = true; break; }
+    }
+    if (!anyNew) return;
+
+    if (drag && !drag.pushed) {
+      pushHistory();
+      drag.pushed = true;
+    }
+    for (let i = 0; i < cells.length; i++) {
+      const key = cells[i].c + ':' + cells[i].r;
+      state.path.delete(key);
+      state.path.add(key);
+    }
+    renderPath();
+  }
+
+  function clearPath() {
+    if (state.path.size === 0) return;
+    pushHistory();
+    state.path.clear();
     renderAll();
   }
   // #endregion
@@ -697,6 +753,7 @@
     state.doors.clear();
     state.openings.clear();
     state.connections = [];
+    state.path.clear();
     state.nextId = 1;
     state.hoverKey = null;
     state.drag = null;
@@ -762,7 +819,8 @@
       rooms: state.rooms,
       doors: Array.from(state.doors),
       connections: state.connections,
-      markers: state.markers
+      markers: state.markers,
+      path: Array.from(state.path)
     };
   }
 
@@ -782,7 +840,7 @@
   function save() {
     try {
       const data = serializeDungeon();
-      if (data.rooms.length === 0) {
+      if (data.rooms.length === 0 && data.path.length === 0) {
         localStorage.removeItem(STORAGE_KEY);
         return;
       }
@@ -875,6 +933,20 @@
       }
     }
 
+    const path = [];
+    if (Array.isArray(data.path)) {
+      for (let i = 0; i < data.path.length; i++) {
+        const key = data.path[i];
+        if (typeof key !== 'string') continue;
+        const parts = key.split(':');
+        if (parts.length !== 2) continue;
+        const c = Number(parts[0]);
+        const r = Number(parts[1]);
+        if (!isInteger(c) || !isInteger(r)) continue;
+        path.push(c + ':' + r);
+      }
+    }
+
     if (!skipHistory) pushHistory();
 
     state.rooms = [];
@@ -882,6 +954,7 @@
     state.openings.clear();
     state.connections = [];
     state.markers = [];
+    state.path = new Set(path);
     state.nextId = 1;
     state.hoverKey = null;
     state.drag = null;
@@ -962,13 +1035,14 @@
     });
   }
 
-  function segmentHtml(key, className) {
+  function segmentHtml(key, className, extraStyle) {
     const seg = parseKey(key);
     const pos = 'left:' + (seg.c * CELL) + 'px;top:' + (seg.r * CELL) + 'px;';
+    const extra = extraStyle ? extraStyle + ';' : '';
     if (seg.dir === 'h') {
-      return '<div class="' + className + ' seg-h" style="' + pos + 'width:' + CELL + 'px"></div>';
+      return '<div class="' + className + ' seg-h" style="' + extra + pos + 'width:' + CELL + 'px"></div>';
     }
-    return '<div class="' + className + ' seg-v" style="' + pos + 'height:' + CELL + 'px"></div>';
+    return '<div class="' + className + ' seg-v" style="' + extra + pos + 'height:' + CELL + 'px"></div>';
   }
 
   function renderRooms() {
@@ -1012,6 +1086,77 @@
     layerDoors.innerHTML = html;
   }
 
+  // #region Rampa de cores do caminho
+  // Monta a sequência de cores do traço: a paleta fixa do seletor (picker.js) com
+  // PATH_TRANSITIONS cores de transição interpoladas entre cada par. O traço usa a
+  // rampa em ordem, então quanto mais o caminho se estende mais a cor vai mudando.
+  const PATH_TRANSITIONS = 5;
+  let pathRamp = null;
+
+  function hexToRgb(hex) {
+    const value = hex.replace('#', '');
+    return {
+      r: parseInt(value.slice(0, 2), 16),
+      g: parseInt(value.slice(2, 4), 16),
+      b: parseInt(value.slice(4, 6), 16)
+    };
+  }
+
+  function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(function (channel) {
+      return Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, '0');
+    }).join('');
+  }
+
+  function buildPathRamp() {
+    const palette = (window.ColorPicker && window.ColorPicker.PRESET_COLORS) || null;
+    if (!palette || palette.length === 0) return ['#5cc8d6'];
+    const colors = palette.map(function (item) { return hexToRgb(item.value); });
+    const ramp = [];
+    for (let i = 0; i < colors.length; i++) {
+      const a = colors[i];
+      const b = colors[(i + 1) % colors.length];
+      ramp.push(rgbToHex(a.r, a.g, a.b));
+      for (let k = 1; k <= PATH_TRANSITIONS; k++) {
+        const t = k / (PATH_TRANSITIONS + 1);
+        ramp.push(rgbToHex(
+          a.r + (b.r - a.r) * t,
+          a.g + (b.g - a.g) * t,
+          a.b + (b.b - a.b) * t
+        ));
+      }
+    }
+    return ramp;
+  }
+  // #endregion
+
+  // Desenha o contorno de cada célula do caminho. Cada célula recebe a próxima cor da
+  // rampa, na ordem em que foi traçada (--path inline). As arestas compartilhadas entre
+  // duas células são desenhadas uma única vez e ficam com a cor da célula mais recente
+  // que as toca (o último traço vence), por isso o uso de um Map em vez de um Set.
+  function renderPath() {
+    if (!pathRamp) pathRamp = buildPathRamp();
+    const total = pathRamp.length;
+    const edges = new Map();
+    let order = 0;
+    state.path.forEach(function (cellKey) {
+      const parts = cellKey.split(':');
+      const c = Number(parts[0]);
+      const r = Number(parts[1]);
+      const color = pathRamp[order % total];
+      order++;
+      edges.set('h:' + c + ':' + r, color);
+      edges.set('h:' + c + ':' + (r + 1), color);
+      edges.set('v:' + c + ':' + r, color);
+      edges.set('v:' + (c + 1) + ':' + r, color);
+    });
+    let html = '';
+    edges.forEach(function (color, edgeKey) {
+      html += segmentHtml(edgeKey, 'seg is-path', '--path:' + color);
+    });
+    layerPath.innerHTML = html;
+  }
+
   function renderMarkers() {
     let html = '';
     for (let i = 0; i < state.markers.length; i++) {
@@ -1051,6 +1196,7 @@
     renderCorridors();
     renderWalls();
     renderDoors();
+    renderPath();
     renderMarkers();
     save();
   }
@@ -1141,6 +1287,14 @@
       return;
     }
 
+    if (state.tool === 'path') {
+      const drag = { type: 'path', pushed: false, last: cell };
+      state.drag = drag;
+      paintPath([cell], drag);
+      stage.setPointerCapture(event.pointerId);
+      return;
+    }
+
     state.drag = { type: 'room', start: cell, current: cell, moved: false };
     clearPreview();
     stage.setPointerCapture(event.pointerId);
@@ -1161,6 +1315,13 @@
     if (!drag) return;
 
     const cell = clampCell(cellFromPoint(point));
+
+    if (drag.type === 'path') {
+      const cells = lineCells(drag.last, cell);
+      drag.last = cell;
+      paintPath(cells, drag);
+      return;
+    }
 
     if (drag.type === 'room') {
       if (cell.c !== drag.current.c || cell.r !== drag.current.r) {
@@ -1237,6 +1398,11 @@
       return;
     }
 
+    if (drag.type === 'path') {
+      if (drag.pushed) renderAll();
+      return;
+    }
+
     // ferramenta de sala
     if (drag.moved) {
       const rect = rectFromCells(drag.start, drag.current);
@@ -1295,8 +1461,9 @@
   }
 
   function onClearClick() {
-    if (state.rooms.length === 0 && state.connections.length === 0 && state.markers.length === 0) return;
-    if (window.confirm('Apagar todas as salas, portas, conexões e marcadores do mapa?')) {
+    if (state.rooms.length === 0 && state.connections.length === 0 &&
+      state.markers.length === 0 && state.path.size === 0) return;
+    if (window.confirm('Apagar todas as salas, portas, conexões, marcadores e o caminho traçado?')) {
       clearMap();
     }
   }
@@ -1406,6 +1573,7 @@
     window.addEventListener('resize', onResize);
 
     clearButton.addEventListener('click', onClearClick);
+    clearPathButton.addEventListener('click', clearPath);
     exportButton.addEventListener('click', exportDungeon);
     importButton.addEventListener('click', function () { fileInput.click(); });
     fileInput.addEventListener('change', onImportFile);

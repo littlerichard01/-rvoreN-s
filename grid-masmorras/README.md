@@ -16,6 +16,7 @@ Disponibilizar um editor visual de masmorras que permita:
 - Definir salas com diferentes dimensões, respeitando o alinhamento das células.
 - Adicionar e remover portas em segmentos de parede existentes.
 - Conectar salas por meio de uma passagem aberta (sem porta), unindo as áreas.
+- Traçar um caminho sobre o grid, destacando as bordas das células percorridas, e limpá-lo quando quiser.
 - Gerar uma masmorra aleatória com a quantidade de salas informada.
 - Exportar e importar o mapa em formato JSON.
 - Desfazer as últimas ações.
@@ -66,6 +67,7 @@ As cores de base provêm do tema genérico compartilhado em `../theme.css` (`:ro
 | `--corridor` | `#6b5836` | `css/style.css` | Células de corredor conectando salas |
 | `--wall` | `#c2a47c` | `css/style.css` | Segmentos de parede |
 | `--door` | `#e6a13a` | `css/style.css` | Segmentos de porta |
+| `--path` | `#5cc8d6` | `css/style.css` | Cor base/fallback do caminho traçado; em uso, cada célula recebe uma cor da rampa do seletor (`js/picker.js`) |
 
 As métricas principais são `--cell: 28px` (tamanho da célula), `--wall-thickness: 4px` e `--door-thickness: 7px`.
 
@@ -78,11 +80,13 @@ A interface é composta por três áreas principais, empilhadas verticalmente: a
 Fixa no topo, contém:
 
 - Os botões **Hub**, **Exportar** e **Importar**, na mesma ordem e estilo das demais ferramentas do hub.
-- Quatro ferramentas de edição (botões mutuamente exclusivos, com estado ativo destacado):
+- Cinco ferramentas de edição (botões mutuamente exclusivos, com estado ativo destacado):
   - **Criar sala** (`data-tool="room"`).
   - **Adicionar porta** (`data-tool="door"`).
   - **Conectar** (`data-tool="connect"`).
   - **Marcador** (`data-tool="marker"`).
+  - **Traçar caminho** (`data-tool="path"`).
+- A ação **Limpar caminho** — apaga o caminho traçado, ao lado da ferramenta de traçado.
 - A ação **Limpar mapa** — apaga tudo, mediante confirmação.
 
 ### 5.2. Área de edição (workspace)
@@ -91,11 +95,12 @@ Fixa no topo, contém:
 
 - O grid é formado por células quadradas uniformes (28px).
 - A área de edição ocupa toda a tela disponível (ver seção 6.8).
-- O grid é desenhado no fundo do `#stage`; sobre ele há seis camadas sobrepostas (`position: absolute`, `pointer-events: none`) que recebem o conteúdo:
+- O grid é desenhado no fundo do `#stage`; sobre ele há sete camadas sobrepostas (`position: absolute`, `pointer-events: none`) que recebem o conteúdo:
   - `#layer-rooms` — preenchimento das salas.
   - `#layer-corridors` — células de corredor (trechos de conexão fora das salas).
   - `#layer-walls` — segmentos de parede.
   - `#layer-doors` — segmentos de porta.
+  - `#layer-path` — bordas das células do caminho traçado.
   - `#layer-markers` — marcadores coloridos.
   - `#layer-preview` — pré-visualizações de sala e de trajeto.
 - A interação é feita por **Pointer Events** diretamente sobre o `#stage`, com captura de ponteiro durante o arraste.
@@ -182,8 +187,8 @@ Durante a criação de salas e de conexões, a aplicação mostra uma prévia an
 O editor mantém um **histórico de estados** em formato de snapshots JSON, com limite de **60 estados** (`HISTORY_LIMIT`). Ao exceder o limite, os estados mais antigos são descartados.
 
 - Atalho: **Ctrl+Z** (ou **Cmd+Z** no macOS).
-- Desfaz, uma etapa por vez, todas as operações que alteram o mapa: criar sala, alternar porta, criar conexão, criar/editar/remover/arrastar marcador, limpar mapa, gerar masmorra, importar arquivo.
-- O estado atual inclui salas, portas, aberturas, conexões e marcadores; ao desfazer, paredes, portas e aberturas são recalculadas e redesenhadas.
+- Desfaz, uma etapa por vez, todas as operações que alteram o mapa: criar sala, alternar porta, criar conexão, criar/editar/remover/arrastar marcador, traçar/limpar caminho, limpar mapa, gerar masmorra, importar arquivo.
+- O estado atual inclui salas, portas, aberturas, conexões, marcadores e o caminho traçado; ao desfazer, paredes, portas e aberturas são recalculadas e redesenhadas.
 - O atalho é ignorado quando o foco está no campo numérico do gerador, para não interferir na edição do valor.
 
 ### 6.6. Geração aleatória de masmorra
@@ -218,7 +223,8 @@ Como a masmorra é construída:
   "rooms": [{ "id": 1, "x": 2, "y": 3, "w": 4, "h": 5 }],
   "doors": ["h:2:3", "v:6:4"],
   "connections": [{ "id": 7, "from": 1, "to": 2, "cells": [{ "c": 2, "r": 3 }] }],
-  "markers": [{ "id": 8, "c": 2, "r": 3, "color": "#ef4444", "label": "Tesouro" }]
+  "markers": [{ "id": 8, "c": 2, "r": 3, "color": "#ef4444", "label": "Tesouro" }],
+  "path": ["16:9", "17:9", "18:9"]
 }
 ```
 
@@ -232,7 +238,8 @@ O download é feito no navegador (Blob + `URL.createObjectURL`), sem backend.
 4. Salas e conexões são recarregadas; em seguida, as **aberturas são recalculadas a partir das conexões** (o arquivo não guarda aberturas), garantindo a consistência visual de passagens sem porta.
 5. As portas listadas em `doors` são restauradas apenas se ainda corresponderem a um segmento de parede existente.
 6. Os marcadores em `markers` são restaurados quando possuem `c` e `r` inteiros; cor e texto ausentes assumem os padrões.
-7. A operação entra no histórico e pode ser desfeita com Ctrl+Z.
+7. As células em `path` (chaves `col:linha`) são restauradas quando válidas; se o campo estiver ausente, o caminho fica vazio.
+8. A operação entra no histórico e pode ser desfeita com Ctrl+Z.
 
 Se o arquivo for inválido ou estiver corrompido, a aplicação exibe um alerta e mantém o mapa atual intacto.
 
@@ -247,7 +254,7 @@ O grid se adapta à tela e ao conteúdo do mapa:
 
 ### 6.9. Limpar mapa
 
-O botão **Limpar mapa** remove todas as salas, portas, aberturas, conexões e marcadores. A ação pede confirmação antes de apagar e **é registrada no histórico**, portanto pode ser desfeita com Ctrl+Z. Se o mapa já estiver vazio, nada acontece.
+O botão **Limpar mapa** remove todas as salas, portas, aberturas, conexões, marcadores e o caminho traçado. A ação pede confirmação antes de apagar e **é registrada no histórico**, portanto pode ser desfeita com Ctrl+Z. Se o mapa já estiver vazio, nada acontece.
 
 ### 6.10. Marcadores
 
@@ -260,6 +267,20 @@ Com a ferramenta **Marcador** ativa, o usuário pode anotar pontos de interesse 
 - **Editar/remover:** um clique simples (sem arrastar) sobre um marcador abre **Editar marcador**, onde é possível alterar texto e cor ou **Remover** o marcador.
 
 Cada célula comporta um marcador.
+
+### 6.11. Caminho traçado
+
+Com a ferramenta **Traçar caminho** ativa, o usuário desenha um caminho sobre o grid e o app **ressalta as bordas** de cada quadradinho percorrido, formando o contorno das células.
+
+- **Traçar:** pressione o botão esquerdo sobre uma célula e arraste; cada célula atingida tem as suas **quatro bordas** realçadas por um contorno tracejado.
+- **Cor por célula:** cada quadradinho do caminho recebe uma cor sólida, vinda de uma rampa montada em `app.js` (`buildPathRamp`) a partir da paleta fixa do seletor (`js/picker.js` → `PRESET_COLORS`), com **5 cores de transição** interpoladas entre cada par de cores.
+- **Mudança gradual ao longo do traço:** a rampa é aplicada **em ordem**, célula a célula na sequência em que o caminho é traçado. Assim um caminho longo mostra várias cores, passando aos poucos de uma para a outra (ex.: verde → transições verde-amarelo → amarelo). A cor é fixa por célula (definida por `--path` inline); não há animação por tempo.
+- **Linha contínua:** entre um movimento e outro, as células intermediárias são preenchidas (interpolação de Bresenham), de modo que arrastes rápidos não deixam falhas no traço.
+- **Acumulativo:** o traço só cresce; passar novamente sobre células já marcadas não cria painéis duplicados.
+- **Cruzamento — o mais recente vence:** quando um traço cruza outro, as células e bordas do cruzamento assumem a cor do traço **mais recente**. Para isso, em `paintPath` a célula repintada é removida e reinserida no fim da ordem do `Set` (assumindo a cor mais nova da rampa), e em `renderPath` as arestas compartilhadas ficam com a cor da **última** célula que as toca (o `Map` de bordas faz a sobrescrita), em vez de manter a primeira.
+- **Limpar caminho:** o botão **Limpar caminho**, ao lado da ferramenta, apaga todo o traçado de uma vez (registrado no histórico, desfazível com Ctrl+Z).
+- O caminho é desenhado acima das paredes e portas e abaixo dos marcadores, e é **salvo localmente** junto com o mapa (restaurado ao recarregar a página).
+- Todo o traçado feito em um mesmo arraste conta como **uma única etapa** no histórico.
 
 ## 7. Modelo lógico dos elementos
 
@@ -289,9 +310,16 @@ O estado do editor é mantido em um único objeto (`state`) e o histórico em um
 { id, c, r, color, label }   // célula (encaixe na grade), cor hexadecimal e texto opcional
 ```
 
+### Caminho
+
+- O caminho traçado fica em `path` (um `Set` de chaves `col:linha` das células marcadas).
+- As bordas desenhadas são derivadas dessas células: para cada célula somam-se as quatro arestas (`h`/`v`) e as duplicadas são unificadas no desenho.
+- A cor de cada célula vem de `buildPathRamp()` (paleta + 5 transições por par) e é aplicada **na ordem do `Set`** (ordem de traçado): a célula de posição `n` usa `ramp[n % ramp.length]`. Células repintadas são movidas para o fim da ordem (`delete` + `add`), assumindo a cor mais recente.
+- As arestas compartilhadas entre células ficam com a cor da **última** célula que as toca (renderizadas a partir de um `Map` chave→cor, com sobrescrita), de forma que um cruzamento assume a cor do traço mais recente.
+
 ### Histórico
 
-`history` guarda snapshots JSON com `{ rooms, doors, openings, connections, markers }`, limitado a 60 entradas.
+`history` guarda snapshots JSON com `{ rooms, doors, openings, connections, markers, path }`, limitado a 60 entradas.
 
 A representação interna pode ser ajustada, desde que permita identificar os elementos e redesenhar o mapa sem inconsistências.
 
@@ -337,6 +365,7 @@ Não é necessário utilizar ferramentas de compilação ou dependências extern
 - [x] A aplicação apresenta uma prévia das salas e conexões durante o arraste.
 - [x] É possível gerar uma masmorra aleatória com a quantidade de salas informada.
 - [x] É possível criar marcadores coloridos com texto opcional, arrastá-los entre as salas e editá-los/removê-los.
+- [x] É possível traçar um caminho destacando as bordas das células percorridas e limpá-lo com um botão.
 - [x] É possível desfazer as ações com Ctrl+Z.
 - [x] É possível exportar e importar a masmorra em formato JSON.
 - [x] O mapa utiliza apenas elementos visuais simples e cores sólidas, sem depender de imagens ou texturas.
@@ -407,6 +436,7 @@ https://<usuario>.github.io/<repositorio>/
 - **Adicionar porta:** clique em um segmento de parede para alternar entre parede e porta.
 - **Conectar:** arraste de dentro de uma sala até outra sala para abrir uma passagem entre elas (sem porta).
 - **Marcador:** clique em uma célula vazia para criar uma bolinha colorida (com texto opcional), arraste um marcador existente para movê-lo e clique nele para editar ou remover.
+- **Traçar caminho:** arraste sobre o grid para destacar as bordas das células percorridas; use **Limpar caminho** para apagar todo o traçado.
 - **Importar / Exportar:** carregue um `masmorra.json` ou baixe o mapa atual em JSON.
 - **Limpar mapa:** remove todos os elementos criados, mediante confirmação.
 - **GERAR MASMORRA:** informe a quantidade de salas no campo numérico e clique no botão na barra inferior.

@@ -35,6 +35,8 @@
       <button type="button" class="btn" data-tool="door" aria-pressed="false">Adicionar porta</button>
       <button type="button" class="btn" data-tool="connect" aria-pressed="false">Conectar</button>
       <button type="button" class="btn" data-tool="marker" aria-pressed="false">Marcador</button>
+      <button type="button" class="btn" data-tool="path" aria-pressed="false">Traçar caminho</button>
+      <button type="button" class="btn btn--ghost" id="btn-clear-path" title="Apagar o caminho traçado">Limpar caminho</button>
     </div>
 
     <button type="button" class="btn btn--danger" id="btn-clear">Limpar mapa</button>
@@ -48,6 +50,7 @@
         <div class="layer" id="layer-corridors"></div>
         <div class="layer" id="layer-walls"></div>
         <div class="layer" id="layer-doors"></div>
+        <div class="layer" id="layer-path"></div>
         <div class="layer" id="layer-markers"></div>
         <div class="layer" id="layer-preview"></div>
       </div>

@@ -13,6 +13,7 @@
   --corridor: #6b5836;
   --wall: #c2a47c;
   --door: #e6a13a;
+  --path: #5cc8d6;
 
   /* Apelidos locais para os tokens genéricos de ../theme.css */
   --bg-page: var(--bg);
@@ -182,6 +183,19 @@ body[data-tool="door"] .stage {
 .seg.is-hover {
   background: var(--accent);
   opacity: 0.45;
+}
+
+/* --- Caminho traçado (contorno tracejado das células) ---
+   A cor de cada célula é definida no JS via --path (inline) e varia aos
+   poucos ao longo do traço: a paleta fixa do seletor de cor (js/picker.js →
+   PRESET_COLORS) é interpolada com 5 cores de transição entre cada par. */
+
+.seg-h.is-path {
+  background: repeating-linear-gradient(to right, var(--path) 0 7px, transparent 7px 14px);
+}
+
+.seg-v.is-path {
+  background: repeating-linear-gradient(to bottom, var(--path) 0 7px, transparent 7px 14px);
 }
 
 /* --- Pré-visualização --- */
